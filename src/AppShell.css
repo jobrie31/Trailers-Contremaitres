@@ -1,0 +1,115 @@
+/* src/AppShell.css */
+:root{
+  --bg: #f6f7f9;
+  --card: #ffffff;
+  --text: #0f172a;
+  --muted: rgba(15, 23, 42, 0.65);
+  --border: rgba(15, 23, 42, 0.10);
+  --shadow: 0 10px 25px rgba(0,0,0,0.06);
+  --shadow2: 0 6px 14px rgba(0,0,0,0.05);
+  --radius: 16px;
+  --radius2: 12px;
+  --btn: #111827;
+  --btnText: #fff;
+  --focus: rgba(59,130,246,0.25);
+}
+
+.appShell{
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, sans-serif;
+}
+
+.topbar{
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(255,255,255,0.85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbarInner{
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand{
+  font-weight: 900;
+  letter-spacing: -0.2px;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.tabs{
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: var(--shadow2);
+}
+
+.tabBtn{
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  font-weight: 900;
+  color: rgba(15,23,42,0.75);
+  background: transparent;
+}
+
+.tabBtn:hover{
+  background: rgba(15,23,42,0.05);
+}
+
+.tabBtnActive{
+  background: var(--btn);
+  color: var(--btnText);
+  box-shadow: 0 6px 14px rgba(0,0,0,0.08);
+}
+
+.topRight{
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.userPill{
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: rgba(15,23,42,0.75);
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.logoutBtn{
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.logoutBtn:hover{
+  background: rgba(15,23,42,0.03);
+}
+
+.content{
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px;
+}
