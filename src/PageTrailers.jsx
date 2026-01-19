@@ -36,35 +36,93 @@ function catColorFromId(catsGlobal, categorieId) {
   const c = catsGlobal.find((x) => x.id === categorieId);
   return (c?.color || DEFAULT_COLOR).trim();
 }
-
 function catNameFromId(catsGlobal, categorieId) {
   const c = catsGlobal.find((x) => x.id === categorieId);
   return (c?.nom || "").trim();
+}
+
+/* ---------- helpers affichage sous-catégories ---------- */
+function shorten(s, max = 34) {
+  const str = (s || "").toString().trim();
+  if (!str) return "";
+  return str.length > max ? str.slice(0, max - 1) + "…" : str;
+}
+function norm(s) {
+  return (s || "").toString().trim().toLowerCase();
+}
+function isUniteLabel(label) {
+  const n = norm(label);
+  return n === "unite" || n === "unité" || n.includes("unité") || n.includes("unite");
+}
+
+/**
+ * (GARDÉ) label riche pour le dropdown "Ajouter équipement"
+ * Exemple: "Sangle — Marque: X • Unité: pce • Modèle: Y"
+ */
+function optionLabelForEquipement(eq, catsGlobal) {
+  const head = (eq?.nom || "").trim() || "—";
+  const extras = [];
+
+  const catId = (eq?.categorieId || "").trim();
+  const cat = catsGlobal.find((c) => (c.id || "").trim() === catId) || null;
+
+  const fieldsRaw = Array.isArray(cat?.fields) ? cat.fields : [];
+  const fields = fieldsRaw
+    .map((f) => {
+      if (!f) return null;
+      if (typeof f === "string") return null; // pas d'id => on ignore
+      if (typeof f === "object") return { id: (f.id || "").toString(), nom: (f.nom || "").toString() };
+      return null;
+    })
+    .filter((f) => f && f.id && f.nom && f.nom.trim());
+
+  const details = eq?.details || {};
+
+  for (const f of fields) {
+    const v = (details?.[f.id] ?? "").toString().trim();
+    if (!v) continue;
+    extras.push(`${f.nom}: ${shorten(v)}`);
+  }
+
+  const hasUniteField = fields.some((f) => isUniteLabel(f.nom));
+  const uniteLegacy = (eq?.unite || "").toString().trim();
+  if (uniteLegacy && !hasUniteField) {
+    extras.push(`Unité: ${shorten(uniteLegacy)}`);
+  }
+
+  return extras.length ? `${head} — ${extras.join(" • ")}` : head;
 }
 
 export default function PageTrailers() {
   const [equipements, setEquipements] = useState([]);
 
   // ✅ catégories globales (créées dans PageÉquipements)
-  const [catsGlobal, setCatsGlobal] = useState([]); // [{id, nom, color}]
+  const [catsGlobal, setCatsGlobal] = useState([]); // [{id, nom, color, fields?}]
 
   const [trailers, setTrailers] = useState([]);
   const [selectedTrailerId, setSelectedTrailerId] = useState(null);
 
-  // Ajouter trailer (1 champ)
+  // Ajouter trailer
   const [trailerNom, setTrailerNom] = useState("");
 
-  // trailer/categories => {id, nom, categorieId}
+  // subcollection trailers/{id}/categories => {id, nom, categorieId}
   const [categories, setCategories] = useState([]);
   const [itemsByCat, setItemsByCat] = useState({});
-  const [addItemState, setAddItemState] = useState({}); // {catId:{equipementId, qty}}
 
-  // UI: ajout catégorie via "+"
-  const [showAddCat, setShowAddCat] = useState(false);
-  const [catToAddId, setCatToAddId] = useState(""); // ✅ categorieId (global)
+  // 🔎 recherche
+  const [search, setSearch] = useState("");
 
-  // UI: ouvrir panneau ajout équipement pour une catégorie
-  const [openAddForCatId, setOpenAddForCatId] = useState(null);
+  // ➕ modal ajout équipement
+  const [showAddEquip, setShowAddEquip] = useState(false);
+  const [addCatGlobalId, setAddCatGlobalId] = useState("");
+  const [addEquipId, setAddEquipId] = useState("");
+  const [addQty, setAddQty] = useState(1);
+
+  // 🧮 modal ajuster quantité (clic item)
+  const [qtyModalOpen, setQtyModalOpen] = useState(false);
+  const [qtyModalCatId, setQtyModalCatId] = useState("");
+  const [qtyModalItem, setQtyModalItem] = useState(null); // {id, nom, qty, equipementId, ...}
+  const [qtyModalDelta, setQtyModalDelta] = useState(1);
 
   // ------------------------- ÉCHANGE (modal) -------------------------
   const [showTrade, setShowTrade] = useState(false);
@@ -80,9 +138,7 @@ export default function PageTrailers() {
   const [tradeToCats, setTradeToCats] = useState([]);
   const [tradeToCatId, setTradeToCatId] = useState("");
 
-  // -------------------------
-  // Banque d’équipements
-  // -------------------------
+  // ------------------------- Banque d’équipements -------------------------
   useEffect(() => {
     const qEq = query(collection(db, "equipements"), orderBy("createdAt", "desc"));
     return onSnapshot(
@@ -92,9 +148,7 @@ export default function PageTrailers() {
     );
   }, []);
 
-  // -------------------------
-  // ✅ Catégories globales (collection "categories")
-  // -------------------------
+  // ------------------------- ✅ Catégories globales (collection "categories") -------------------------
   useEffect(() => {
     const qC = query(collection(db, "categories"), orderBy("createdAt", "asc"));
     return onSnapshot(
@@ -108,9 +162,7 @@ export default function PageTrailers() {
     return [...catsGlobal].sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
   }, [catsGlobal]);
 
-  // -------------------------
-  // Trailers
-  // -------------------------
+  // ------------------------- Trailers -------------------------
   useEffect(() => {
     const qT = query(collection(db, "trailers"), orderBy("createdAt", "desc"));
     return onSnapshot(
@@ -134,24 +186,19 @@ export default function PageTrailers() {
     [trailers, selectedTrailerId]
   );
 
-  // -------------------------
-  // Categories du trailer sélectionné
-  // -------------------------
+  // ------------------------- Categories du trailer sélectionné (subcollection) -------------------------
   useEffect(() => {
     setCategories([]);
-    setShowAddCat(false);
-    setCatToAddId("");
-    setOpenAddForCatId(null);
-    setAddItemState({});
     setItemsByCat({});
+    setSearch("");
+    setShowAddEquip(false);
+    setAddCatGlobalId("");
+    setAddEquipId("");
+    setAddQty(1);
 
     if (!selectedTrailerId) return;
 
-    const qC = query(
-      collection(db, "trailers", selectedTrailerId, "categories"),
-      orderBy("createdAt", "asc")
-    );
-
+    const qC = query(collection(db, "trailers", selectedTrailerId, "categories"), orderBy("createdAt", "asc"));
     return onSnapshot(
       qC,
       (snap) => setCategories(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
@@ -159,9 +206,44 @@ export default function PageTrailers() {
     );
   }, [selectedTrailerId]);
 
-  // -------------------------
-  // Items par catégorie
-  // -------------------------
+  // ------------------------- ✅ Sync: chaque trailer a TOUJOURS toutes les catégories globales -------------------------
+  async function ensureAllCategoriesForTrailer(trailerId) {
+    if (!trailerId) return;
+    if (catsGlobalSorted.length === 0) return;
+
+    const catsCol = collection(db, "trailers", trailerId, "categories");
+    const snap = await getDocs(query(catsCol, orderBy("createdAt", "asc")));
+    const existing = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+    const existingByGlobalId = new Map();
+    for (const c of existing) {
+      const gid = (c.categorieId || "").trim();
+      if (gid) existingByGlobalId.set(gid, c);
+    }
+
+    const missing = catsGlobalSorted.filter((g) => !existingByGlobalId.has((g.id || "").trim()));
+    if (missing.length === 0) return;
+
+    const batch = writeBatch(db);
+    for (const g of missing) {
+      const newRef = doc(catsCol);
+      batch.set(newRef, {
+        categorieId: g.id,
+        nom: g.nom || "",
+        createdAt: serverTimestamp(),
+        source: "global_auto",
+      });
+    }
+    await batch.commit();
+  }
+
+  useEffect(() => {
+    if (!selectedTrailerId) return;
+    ensureAllCategoriesForTrailer(selectedTrailerId).catch((e) => console.error("ensureAllCategoriesForTrailer:", e));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTrailerId, catsGlobalSorted.length]);
+
+  // ------------------------- Items par catégorie (listeners) -------------------------
   useEffect(() => {
     setItemsByCat({});
     if (!selectedTrailerId) return;
@@ -188,17 +270,7 @@ export default function PageTrailers() {
     return () => unsubs.forEach((u) => u && u());
   }, [categories, selectedTrailerId]);
 
-  // -------------------------
-  // Helpers
-  // -------------------------
-  function setCatAddState(catId, patch) {
-    setAddItemState((prev) => ({
-      ...prev,
-      [catId]: { equipementId: "", qty: 1, ...(prev[catId] || {}), ...patch },
-    }));
-  }
-
-  // ✅ Equipements filtrés par categorieId (pas par texte)
+  // ------------------------- Helpers -------------------------
   function equipementsPourCategorieId(categorieId) {
     const cid = (categorieId || "").trim();
     return equipements
@@ -206,9 +278,77 @@ export default function PageTrailers() {
       .sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
   }
 
-  // -------------------------
-  // Actions
-  // -------------------------
+  function findTrailerCatDocIdByGlobalCatId(globalCatId) {
+    const gid = (globalCatId || "").trim();
+    const found = categories.find((c) => (c.categorieId || "").trim() === gid);
+    return found?.id || "";
+  }
+
+  function normalize(s) {
+    return (s || "").toString().toLowerCase().trim();
+  }
+
+  function filterItems(items) {
+    const q = normalize(search);
+    if (!q) return items;
+    return (items || []).filter((it) => normalize(it.nom).includes(q));
+  }
+
+  const categoriesSorted = useMemo(() => {
+    const copy = [...categories];
+    copy.sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
+    return copy;
+  }, [categories]);
+
+  function equipementById(id) {
+    const eid = (id || "").trim();
+    return equipements.find((e) => (e.id || "").trim() === eid) || null;
+  }
+
+  // ✅ champs (sous-catégories) pour une catégorie globale => colonnes du tableau
+  function fieldsForGlobalCatId(globalCatId) {
+    const gid = (globalCatId || "").trim();
+    const cat = catsGlobal.find((c) => (c.id || "").trim() === gid) || null;
+
+    const fieldsRaw = Array.isArray(cat?.fields) ? cat.fields : [];
+    const fields = fieldsRaw
+      .map((f) => {
+        if (!f) return null;
+        if (typeof f === "string") return null; // pas d'id => ignore (sinon impossible de lire eq.details)
+        if (typeof f === "object") return { id: (f.id || "").toString(), nom: (f.nom || "").toString() };
+        return null;
+      })
+      .filter((x) => x && x.id && (x.nom || "").trim());
+
+    return fields;
+  }
+
+  // ✅ valeur d’une colonne (field) pour un item de trailer
+  function valueForItemField(item, field) {
+    const eq = equipementById(item?.equipementId);
+    if (!eq) return "";
+
+    const d = eq.details || {};
+    const v = (d?.[field.id] ?? "").toString().trim();
+    if (v) return v;
+
+    // fallback legacy unite
+    if (isUniteLabel(field.nom)) {
+      const u = (eq.unite || "").toString().trim();
+      if (u) return u;
+    }
+
+    return "";
+  }
+
+  // label riche seulement pour le modal quantité / échange
+  function labelForTrailerItem(it) {
+    const eq = equipementById(it?.equipementId);
+    if (eq) return optionLabelForEquipement(eq, catsGlobal);
+    return (it?.nom || "").trim() || "—";
+  }
+
+  // ------------------------- Actions -------------------------
   async function ajouterTrailer(e) {
     e.preventDefault();
     const tn = trailerNom.trim();
@@ -221,113 +361,109 @@ export default function PageTrailers() {
 
     setTrailerNom("");
     setSelectedTrailerId(ref.id);
+
+    try {
+      await ensureAllCategoriesForTrailer(ref.id);
+    } catch (err) {
+      console.error("ensure categories on create:", err);
+    }
   }
 
-  // ✅ Ajouter une catégorie au trailer depuis categories (global)
-  async function ajouterCategorieDepuisGlobal() {
+  function openAddEquipModalForCategory(globalCatId) {
     if (!selectedTrailerId) return;
-    const cid = (catToAddId || "").trim();
-    if (!cid) return;
-
-    const catNom = catNameFromId(catsGlobal, cid);
-    if (!catNom) return alert("Catégorie introuvable.");
-
-    const deja = categories.some((c) => (c.categorieId || "") === cid);
-    if (deja) return alert("Cette catégorie est déjà ajoutée dans ce trailer.");
-
-    await addDoc(collection(db, "trailers", selectedTrailerId, "categories"), {
-      categorieId: cid,
-      nom: catNom,
-      createdAt: serverTimestamp(),
-      source: "global",
-    });
-
-    setCatToAddId("");
-    setShowAddCat(false);
+    setShowAddEquip(true);
+    setAddCatGlobalId((globalCatId || "").trim());
+    setAddEquipId("");
+    setAddQty(1);
   }
 
-  async function ajouterItem(cat) {
+  async function ajouterEquipementAuTrailer() {
     if (!selectedTrailerId) return;
-    const catId = cat.id;
+    if (!addCatGlobalId) return alert("Choisis une catégorie.");
+    if (!addEquipId) return alert("Choisis un équipement.");
 
-    const st = addItemState[catId] || { equipementId: "", qty: 1 };
-    const eqId = st.equipementId;
-    const qty = Number(st.qty || 0);
+    const qty = Number(addQty || 0);
+    if (!qty || qty <= 0) return alert("Quantité invalide (min 1).");
 
-    if (!eqId) return alert("Choisis un équipement.");
-    if (!qty || qty <= 0) return alert("Quantité invalide.");
+    let trailerCatDocId = findTrailerCatDocIdByGlobalCatId(addCatGlobalId);
 
-    const eq = equipements.find((e) => e.id === eqId);
+    if (!trailerCatDocId) {
+      await ensureAllCategoriesForTrailer(selectedTrailerId);
+      trailerCatDocId = findTrailerCatDocIdByGlobalCatId(addCatGlobalId);
+      if (!trailerCatDocId) return alert("Erreur: catégorie introuvable dans ce trailer.");
+    }
+
+    const eq = equipements.find((e) => e.id === addEquipId);
     if (!eq) return alert("Équipement introuvable.");
 
-    await addDoc(collection(db, "trailers", selectedTrailerId, "categories", catId, "items"), {
-      equipementId: eqId,
-      nom: eq.nom || "",
-      unite: eq.unite || "",
-      qty,
-      createdAt: serverTimestamp(),
-    });
+    const itemsCol = collection(db, "trailers", selectedTrailerId, "categories", trailerCatDocId, "items");
 
-    setCatAddState(catId, { equipementId: "", qty: 1 });
-    setOpenAddForCatId(null);
+    const qExisting = query(itemsCol, where("equipementId", "==", addEquipId));
+    const exSnap = await getDocs(qExisting);
+
+    const batch = writeBatch(db);
+
+    if (!exSnap.empty) {
+      const ex = exSnap.docs[0];
+      const newQty = Number(ex.data().qty || 0) + qty;
+      batch.update(ex.ref, { qty: newQty });
+    } else {
+      const newRef = doc(itemsCol);
+      batch.set(newRef, {
+        equipementId: addEquipId,
+        nom: eq.nom || "",
+        unite: eq.unite || "",
+        qty,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+
+    setShowAddEquip(false);
+    setAddEquipId("");
+    setAddQty(1);
+  }
+
+  function openQtyModal(catId, item) {
+    setQtyModalCatId(catId);
+    setQtyModalItem(item);
+    setQtyModalDelta(1);
+    setQtyModalOpen(true);
+  }
+
+  async function applyQtyDelta(sign) {
+    if (!selectedTrailerId) return;
+    if (!qtyModalOpen || !qtyModalCatId || !qtyModalItem?.id) return;
+
+    const delta = Number(qtyModalDelta || 0);
+    if (!delta || delta <= 0) return alert("Entre une quantité valide (min 1).");
+
+    const current = Number(qtyModalItem.qty || 0);
+    const next = sign === "add" ? current + delta : current - delta;
+
+    const ref = doc(db, "trailers", selectedTrailerId, "categories", qtyModalCatId, "items", qtyModalItem.id);
+
+    try {
+      if (next <= 0) {
+        await deleteDoc(ref);
+      } else {
+        await updateDoc(ref, { qty: next });
+      }
+      setQtyModalOpen(false);
+    } catch (e) {
+      console.error("applyQtyDelta:", e);
+      alert("Erreur modification quantité: " + (e?.message || "inconnue"));
+    }
   }
 
   async function supprimerItem(catId, itemId) {
     if (!selectedTrailerId) return;
     if (!window.confirm("Supprimer cet item?")) return;
-
     await deleteDoc(doc(db, "trailers", selectedTrailerId, "categories", catId, "items", itemId));
   }
 
-  // ✅ Qté modifiable directement
-  async function updateQty(catId, itemId, qtyValue) {
-    if (!selectedTrailerId) return;
-
-    const qty = Number(qtyValue || 0);
-    if (!qty || qty <= 0) return;
-
-    try {
-      await updateDoc(doc(db, "trailers", selectedTrailerId, "categories", catId, "items", itemId), {
-        qty,
-      });
-    } catch (e) {
-      console.error("update qty error:", e);
-      alert("Erreur modification quantité: " + (e?.message || "inconnue"));
-    }
-  }
-
-  // ✅ Retirer: supprime items + doc catégorie
-  async function retirerCategorie(catId) {
-    if (!selectedTrailerId) return;
-    if (!window.confirm("Retirer cette catégorie du trailer?\n(Tous les items dedans seront supprimés)")) return;
-
-    try {
-      const itemsRef = collection(db, "trailers", selectedTrailerId, "categories", catId, "items");
-      const snap = await getDocs(itemsRef);
-
-      let batch = writeBatch(db);
-      let count = 0;
-
-      for (const d of snap.docs) {
-        batch.delete(d.ref);
-        count++;
-        if (count % 450 === 0) {
-          await batch.commit();
-          batch = writeBatch(db);
-        }
-      }
-      await batch.commit();
-
-      await deleteDoc(doc(db, "trailers", selectedTrailerId, "categories", catId));
-    } catch (e) {
-      console.error("retirerCategorie error:", e);
-      alert("Erreur Retirer: " + (e?.message || "inconnue"));
-    }
-  }
-
-  // -------------------------
-  // ÉCHANGE helpers
-  // -------------------------
+  // ------------------------- ÉCHANGE helpers -------------------------
   async function loadCatsForTrailer(trailerId) {
     if (!trailerId) return [];
     const qC = query(collection(db, "trailers", trailerId, "categories"), orderBy("createdAt", "asc"));
@@ -337,10 +473,7 @@ export default function PageTrailers() {
 
   async function loadItemsForCat(trailerId, catId) {
     if (!trailerId || !catId) return [];
-    const qI = query(
-      collection(db, "trailers", trailerId, "categories", catId, "items"),
-      orderBy("createdAt", "asc")
-    );
+    const qI = query(collection(db, "trailers", trailerId, "categories", catId, "items"), orderBy("createdAt", "asc"));
     const snap = await getDocs(qI);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
   }
@@ -457,12 +590,10 @@ export default function PageTrailers() {
 
       const batch = writeBatch(db);
 
-      // source
       const remaining = Number(item.qty || 0) - moveQty;
       if (remaining <= 0) batch.delete(fromItemRef);
       else batch.update(fromItemRef, { qty: remaining });
 
-      // destination
       if (!existingSnap.empty) {
         const ex = existingSnap.docs[0];
         const newQty = Number(ex.data().qty || 0) + moveQty;
@@ -487,9 +618,15 @@ export default function PageTrailers() {
     }
   }
 
-  // -------------------------
-  // Render
-  // -------------------------
+  // ------------------------- Options ajout modal -------------------------
+  const addEquipOptions = useMemo(() => {
+    const gid = (addCatGlobalId || "").trim();
+    if (!gid) return [];
+    return equipementsPourCategorieId(gid);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addCatGlobalId, equipements]);
+
+  // ------------------------- Render -------------------------
   return (
     <div className="pt-page">
       <div className="pt-header">
@@ -498,13 +635,15 @@ export default function PageTrailers() {
             <div>
               <h1 className="pt-title">Trailers</h1>
               <div className="pt-sub">
-                “+” en haut : ajoute une catégorie (créée dans Équipements). “+” dans une catégorie : ajoute un équipement.
+                Clique sur un item pour ajuster sa quantité. Les sous-catégories (Marque/Unité/etc.) apparaissent en COLONNES.
               </div>
             </div>
 
-            <button className="pt-btn pt-btnSwap" type="button" onClick={openTradeModal} disabled={trailers.length < 2}>
-              Faire un échange
-            </button>
+            <div className="pt-headerActions">
+              <button className="pt-btn pt-btnSwap" type="button" onClick={openTradeModal} disabled={trailers.length < 2}>
+                Faire un échange
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -557,69 +696,36 @@ export default function PageTrailers() {
 
         {/* RIGHT */}
         <div className="pt-card">
-          <div className="pt-cardTitle">
-            <span>Détails</span>
-
-            {/* "+" global pour ajouter une catégorie */}
-            <div className="pt-cardTitleRight">
-              <button
-                className="pt-iconBtn"
-                type="button"
-                title="Ajouter une catégorie"
-                onClick={() => {
-                  if (!selectedTrailerId) return;
-                  setShowAddCat((v) => !v);
-                  setCatToAddId("");
-                }}
-              >
-                +
-              </button>
-
-              {showAddCat && (
-                <div className="pt-popover">
-                  <div className="pt-popoverTitle">Ajouter une catégorie</div>
-
-                  {catsGlobalSorted.length === 0 ? (
-                    <div className="pt-empty">Aucune catégorie. Va dans Équipements et crée des catégories avec le “+”.</div>
-                  ) : (
-                    <div className="pt-popoverRow">
-                      <select className="pt-select" value={catToAddId} onChange={(e) => setCatToAddId(e.target.value)}>
-                        <option value="">Choisir une catégorie…</option>
-                        {catsGlobalSorted.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.nom}
-                          </option>
-                        ))}
-                      </select>
-
-                      <button className="pt-btn" type="button" onClick={ajouterCategorieDepuisGlobal}>
-                        Ajouter
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+          <div className="pt-cardTitle" style={{ justifyContent: "flex-end" }}>
+            <input
+              className="pt-input pt-search"
+              placeholder="Rechercher un équipement dans ce trailer…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              disabled={!selectedTrailerId}
+            />
           </div>
 
           {!selectedTrailer ? (
             <div className="pt-empty">Choisis un trailer.</div>
           ) : (
             <>
-              <h2 className="pt-detailTitle">{selectedTrailer.trailerNom}</h2>
+              <h2 className="pt-detailTitle" style={{ fontSize: 30, fontWeight: 950, marginTop: 6 }}>
+                {selectedTrailer.trailerNom}
+              </h2>
 
-              {categories.length === 0 ? (
-                <div className="pt-empty">Aucune catégorie. Clique sur “+” en haut à droite pour en ajouter.</div>
+              {categoriesSorted.length === 0 ? (
+                <div className="pt-empty">Chargement des catégories…</div>
               ) : (
                 <div className="pt-cats">
-                  {categories.map((cat) => {
-                    const items = itemsByCat[cat.id] || [];
-                    const st = addItemState[cat.id] || { equipementId: "", qty: 1 };
+                  {categoriesSorted.map((cat) => {
+                    const itemsAll = itemsByCat[cat.id] || [];
+                    const items = filterItems(itemsAll);
 
-                    const eqOptions = equipementsPourCategorieId(cat.categorieId);
-                    const isOpen = openAddForCatId === cat.id;
+                    if (search.trim() && items.length === 0) return null;
 
                     const base = catColorFromId(catsGlobal, cat.categorieId);
+                    const cols = fieldsForGlobalCatId(cat.categorieId);
 
                     return (
                       <div
@@ -642,97 +748,94 @@ export default function PageTrailers() {
                                 display: "inline-block",
                               }}
                             />
-                            <span>{cat.nom || "Catégorie"}</span>
+                            <span>{cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie"}</span>
                           </div>
 
-                          <div className="pt-catActions">
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <div className="pt-catMeta">
+                              {itemsAll.length} item{itemsAll.length > 1 ? "s" : ""}
+                            </div>
+
                             <button
-                              className="pt-miniIconBtn"
                               type="button"
-                              title="Ajouter un équipement"
-                              onClick={() => {
-                                setOpenAddForCatId((prev) => (prev === cat.id ? null : cat.id));
-                                setCatAddState(cat.id, {});
-                              }}
+                              className="pt-btn"
+                              style={{ height: 32, padding: "0 10px" }}
+                              onClick={() => openAddEquipModalForCategory(cat.categorieId)}
+                              title="Ajouter un équipement dans cette catégorie"
+                              disabled={!selectedTrailerId}
                             >
                               +
-                            </button>
-
-                            <button className="pt-btnDanger" type="button" onClick={() => retirerCategorie(cat.id)}>
-                              Retirer
                             </button>
                           </div>
                         </div>
 
-                        {/* panneau ajout (sans notes) */}
-                        {isOpen && (
-                          <div className="pt-addPanel">
-                            <div className="pt-addItemRow">
-                              <select
-                                className="pt-select"
-                                value={st.equipementId}
-                                onChange={(e) => setCatAddState(cat.id, { equipementId: e.target.value })}
-                              >
-                                <option value="">Choisir un équipement…</option>
-                                {eqOptions.map((eq) => (
-                                  <option key={eq.id} value={eq.id}>
-                                    {eq.nom}
-                                    {eq.unite ? ` (${eq.unite})` : ""}
-                                  </option>
-                                ))}
-                              </select>
-
-                              <input
-                                className="pt-input pt-qty"
-                                type="number"
-                                min="1"
-                                value={st.qty}
-                                onChange={(e) => setCatAddState(cat.id, { qty: e.target.value })}
-                              />
-
-                              <button className="pt-btn" type="button" onClick={() => ajouterItem(cat)}>
-                                Ajouter
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* items (sans notes) */}
-                        {items.length === 0 ? (
+                        {itemsAll.length === 0 ? (
                           <div className="pt-empty" style={{ marginTop: 10 }}>
                             Aucun item dans cette catégorie.
                           </div>
+                        ) : items.length === 0 ? (
+                          <div className="pt-empty" style={{ marginTop: 10 }}>
+                            Aucun résultat pour “{search}”.
+                          </div>
                         ) : (
-                          <div className="pt-items">
-                            {items.map((it) => (
-                              <div key={it.id} className="pt-itemRow" style={{ gridTemplateColumns: "1.8fr 120px 70px" }}>
-                                <div className="pt-itemName">
-                                  {it.nom || "—"}{" "}
-                                  <span className="pt-itemUnit">{it.unite ? `(${it.unite})` : ""}</span>
-                                </div>
+                          // ✅ TABLEAU: maintenant compact via CSS (.pt-th/.pt-td/.pt-tableWrap/.pt-table)
+                          <div className="pt-tableWrap">
+                            <table className="pt-table">
+                              <thead>
+                                <tr>
+                                  <th className="pt-th">Nom</th>
+                                  {cols.map((f) => (
+                                    <th key={f.id} className="pt-th">
+                                      {f.nom}
+                                    </th>
+                                  ))}
+                                  <th className="pt-th" style={{ textAlign: "right" }}>
+                                    Qté
+                                  </th>
+                                  <th className="pt-th" style={{ textAlign: "right" }}>
+                                    Actions
+                                  </th>
+                                </tr>
+                              </thead>
 
-                                <input
-                                  className="pt-input pt-qty"
-                                  type="number"
-                                  min="1"
-                                  defaultValue={it.qty || 1}
-                                  onBlur={(e) => updateQty(cat.id, it.id, e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") e.currentTarget.blur();
-                                  }}
-                                />
+                              <tbody>
+                                {items.map((it) => {
+                                  return (
+                                    <tr
+                                      key={it.id}
+                                      style={{ cursor: "pointer" }}
+                                      onClick={() => openQtyModal(cat.id, it)}
+                                      title="Cliquer pour ajuster la quantité"
+                                    >
+                                      <td className="pt-td">
+                                        <div style={{ fontWeight: 900 }}>{it.nom || "—"}</div>
+                                      </td>
 
-                                <div style={{ textAlign: "right" }}>
-                                  <button
-                                    type="button"
-                                    className="pt-btnDanger"
-                                    onClick={() => supprimerItem(cat.id, it.id)}
-                                  >
-                                    X
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
+                                      {cols.map((f) => {
+                                        const v = valueForItemField(it, f);
+                                        return (
+                                          <td key={f.id} className="pt-td">
+                                            {v ? v : <span style={{ opacity: 0.55 }}>—</span>}
+                                          </td>
+                                        );
+                                      })}
+
+                                      <td className="pt-td" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                                        <span className="pt-qtyBadge" style={{ display: "inline-flex", justifyContent: "flex-end" }}>
+                                          <span>{Number(it.qty || 0)}</span>
+                                        </span>
+                                      </td>
+
+                                      <td className="pt-td" style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                                        <button type="button" className="pt-btnDanger" onClick={() => supprimerItem(cat.id, it.id)}>
+                                          X
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
                         )}
                       </div>
@@ -744,6 +847,122 @@ export default function PageTrailers() {
           )}
         </div>
       </div>
+
+      {/* ---------------- MODAL AJOUT ÉQUIPEMENT ---------------- */}
+      {showAddEquip && (
+        <div className="pt-modalOverlay" onMouseDown={() => setShowAddEquip(false)}>
+          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="pt-modalHead">
+              <div className="pt-modalTitle">Ajouter un équipement</div>
+              <button className="pt-modalClose" type="button" onClick={() => setShowAddEquip(false)}>
+                ✕
+              </button>
+            </div>
+
+            <div className="pt-modalBody">
+              <div className="pt-modalBlock" style={{ background: "#fff" }}>
+                <div className="pt-modalLabel">Catégorie</div>
+                <select
+                  className="pt-select"
+                  value={addCatGlobalId}
+                  onChange={(e) => {
+                    setAddCatGlobalId(e.target.value);
+                    setAddEquipId("");
+                  }}
+                >
+                  <option value="">Choisir une catégorie…</option>
+                  {catsGlobalSorted.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nom}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="pt-modalLabel">Équipement</div>
+                <select className="pt-select" value={addEquipId} onChange={(e) => setAddEquipId(e.target.value)}>
+                  <option value="">Choisir un équipement…</option>
+                  {addEquipOptions.map((eq) => (
+                    <option key={eq.id} value={eq.id}>
+                      {optionLabelForEquipement(eq, catsGlobal)}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="pt-modalLabel">Quantité</div>
+                <input
+                  className="pt-input pt-qtyInput pt-noSpin"
+                  type="number"
+                  min="1"
+                  value={addQty}
+                  onChange={(e) => setAddQty(e.target.value)}
+                />
+
+                <div className="pt-modalHint">Si l’équipement existe déjà dans cette catégorie, la quantité sera additionnée.</div>
+              </div>
+            </div>
+
+            <div className="pt-modalFoot">
+              <button className="pt-btn" type="button" onClick={ajouterEquipementAuTrailer}>
+                Ajouter
+              </button>
+              <button className="pt-btn pt-btnGhost" type="button" onClick={() => setShowAddEquip(false)}>
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ---------------- MODAL AJUSTER QUANTITÉ ---------------- */}
+      {qtyModalOpen && qtyModalItem && (
+        <div className="pt-modalOverlay" onMouseDown={() => setQtyModalOpen(false)}>
+          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="pt-modalHead">
+              <div className="pt-modalTitle">Ajuster quantité</div>
+              <button className="pt-modalClose" type="button" onClick={() => setQtyModalOpen(false)}>
+                ✕
+              </button>
+            </div>
+
+            <div className="pt-modalBody">
+              <div className="pt-qtyTop">
+                <div className="pt-qtyTitle">{labelForTrailerItem(qtyModalItem)}</div>
+                <div className="pt-qtyCurrent">
+                  Qté actuelle: <b>{Number(qtyModalItem.qty || 0)}</b>
+                </div>
+              </div>
+
+              <div className="pt-modalBlock" style={{ background: "#fff" }}>
+                <div className="pt-modalLabel">Combien ajouter / enlever ?</div>
+                <input
+                  className="pt-input pt-qtyInput pt-noSpin"
+                  type="number"
+                  min="1"
+                  value={qtyModalDelta}
+                  onChange={(e) => setQtyModalDelta(e.target.value)}
+                />
+
+                <div className="pt-qtyActions">
+                  <button className="pt-btn" type="button" onClick={() => applyQtyDelta("add")}>
+                    Ajouter
+                  </button>
+                  <button className="pt-btnDangerWide" type="button" onClick={() => applyQtyDelta("remove")}>
+                    Enlever
+                  </button>
+                </div>
+
+                <div className="pt-modalHint">Si la quantité tombe à 0 ou moins, l’équipement est retiré du trailer.</div>
+              </div>
+            </div>
+
+            <div className="pt-modalFoot">
+              <button className="pt-btn pt-btnGhost" type="button" onClick={() => setQtyModalOpen(false)}>
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ---------------- MODAL ÉCHANGE ---------------- */}
       {showTrade && (
@@ -773,7 +992,6 @@ export default function PageTrailers() {
                   <select className="pt-select" value={tradeFromCatId} onChange={(e) => onChangeFromCat(e.target.value)}>
                     <option value="">Catégorie…</option>
                     {tradeFromCats.map((c) => {
-                      const base = catColorFromId(catsGlobal, c.categorieId);
                       const label = c.nom || catNameFromId(catsGlobal, c.categorieId) || "Catégorie";
                       return (
                         <option key={c.id} value={c.id}>
@@ -794,13 +1012,13 @@ export default function PageTrailers() {
                     <option value="">Article…</option>
                     {tradeFromItems.map((it) => (
                       <option key={it.id} value={it.id}>
-                        {it.nom} — dispo: {it.qty}
+                        {labelForTrailerItem(it)} — dispo: {it.qty}
                       </option>
                     ))}
                   </select>
 
                   <input
-                    className="pt-input"
+                    className="pt-input pt-noSpin"
                     type="number"
                     min="1"
                     value={tradeQty}
@@ -830,9 +1048,7 @@ export default function PageTrailers() {
                     ))}
                   </select>
 
-                  <div className="pt-modalHint">
-                    Astuce: si le trailer destination a la même catégorie, je la sélectionne automatiquement.
-                  </div>
+                  <div className="pt-modalHint">Astuce: si le trailer destination a la même catégorie, je la sélectionne automatiquement.</div>
                 </div>
               </div>
             </div>
