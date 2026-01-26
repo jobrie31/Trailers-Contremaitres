@@ -6,12 +6,13 @@ import Login from "./Login";
 
 import PageTrailers from "./PageTrailers";
 import PageEquipements from "./PageEquipements";
+import PageReglagesAdmin from "./PageReglagesAdmin"; // ✅ NEW
 
 import "./AppShell.css";
 
 export default function App() {
   const [user, setUser] = useState(undefined);
-  const [route, setRoute] = useState("trailers"); // "trailers" | "equipements"
+  const [route, setRoute] = useState("trailers"); // "trailers" | "equipements" | "reglages"
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => setUser(u || null));
@@ -34,12 +35,22 @@ export default function App() {
             >
               Trailers
             </button>
+
             <button
               className={`tabBtn ${route === "equipements" ? "tabBtnActive" : ""}`}
               onClick={() => setRoute("equipements")}
               type="button"
             >
               Équipements
+            </button>
+
+            {/* ✅ NEW: Réglages */}
+            <button
+              className={`tabBtn ${route === "reglages" ? "tabBtnActive" : ""}`}
+              onClick={() => setRoute("reglages")}
+              type="button"
+            >
+              Réglages
             </button>
           </nav>
 
@@ -53,7 +64,13 @@ export default function App() {
       </header>
 
       <main className="content">
-        {route === "trailers" ? <PageTrailers /> : <PageEquipements />}
+        {route === "trailers" ? (
+          <PageTrailers />
+        ) : route === "equipements" ? (
+          <PageEquipements />
+        ) : (
+          <PageReglagesAdmin />
+        )}
       </main>
     </div>
   );

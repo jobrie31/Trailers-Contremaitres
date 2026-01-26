@@ -1,0 +1,544 @@
+/* src/PageEquipements.css */
+
+.peq-page {
+  background: transparent;
+}
+
+.peq-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.peq-title {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.peq-subtitle {
+  font-size: 13px;
+  color: rgba(15, 23, 42, 0.65);
+  margin-top: 4px;
+}
+
+.peq-addcatWrap {
+  position: relative;
+}
+
+.peq-iconBtn {
+  height: 38px;
+  width: 38px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 900;
+  font-size: 18px;
+}
+
+/* popover */
+.peq-popover {
+  position: absolute;
+  right: 0;
+  top: 44px;
+  width: 420px;
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 14px 35px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+}
+
+.peq-popTitle {
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+
+.peq-gridNewCat {
+  display: grid;
+  grid-template-columns: 1fr 110px auto;
+  gap: 8px;
+}
+
+.peq-blockTitle {
+  margin-top: 12px;
+  font-weight: 900;
+}
+
+.peq-gridAddField {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.peq-chips {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.peq-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  font-weight: 800;
+}
+
+.peq-chipX {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  cursor: pointer;
+  font-weight: 900;
+  line-height: 22px;
+}
+
+.peq-chipXDanger {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* message */
+.peq-msg {
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.03);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+}
+
+/* cards */
+.peq-card {
+  background: #fff;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.06);
+  margin-bottom: 12px;
+}
+
+.peq-cardForm {
+  margin-bottom: 12px;
+}
+
+.peq-cardTitle {
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
+/* inputs & buttons */
+.peq-input {
+  height: 42px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  padding: 0 12px;
+  outline: none;
+  background: #fff;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.peq-inputDisabled {
+  background: rgba(15, 23, 42, 0.03);
+}
+
+.peq-btn {
+  height: 42px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 14px;
+  background: #111827;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.peq-btnSmall {
+  height: 36px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 12px;
+  background: #111827;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.peq-ghostBtnSmall {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.peq-dangerBtnSmall {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.peq-empty {
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.03);
+  border: 1px dashed rgba(15, 23, 42, 0.12);
+  color: rgba(15, 23, 42, 0.65);
+  font-size: 13px;
+}
+
+/* color pickers */
+.peq-colorPicker {
+  height: 42px;
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+}
+
+.peq-colorPickerSmall {
+  height: 34px;
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: #fff;
+}
+
+/* popover categories list */
+.peq-catsList {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.peq-catCard {
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 12px;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.peq-catCardTop {
+  display: grid;
+  grid-template-columns: 1fr 110px auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.peq-catName {
+  font-weight: 900;
+}
+
+.peq-managePanel {
+  border-top: 1px dashed rgba(15, 23, 42, 0.15);
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.peq-manageTitle {
+  font-weight: 900;
+}
+
+/* add equipment layout */
+.peq-gridAddEquip {
+  display: grid;
+  grid-template-columns: 1.6fr 1.2fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.peq-dynFields {
+  margin-top: 10px;
+}
+
+.peq-gridDynInputs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+/* tabs */
+.peq-tabsRow {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.peq-tab {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 999px;
+  padding: 7px 10px; /* ✅ plus petit */
+  cursor: pointer;
+  font-weight: 900;
+  background: rgba(255, 255, 255, 0.95);
+  color: rgba(15, 23, 42, 0.92);
+}
+
+.peq-tab.isActive {
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.06);
+}
+
+.peq-tabDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 99px;
+}
+
+.peq-tabName {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peq-tabCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 20px; /* ✅ plus petit */
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(15, 23, 42, 0.04);
+  font-size: 12px;
+}
+
+/* ✅ category opened panel (background couleur) */
+.peq-catPanel {
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 16px;
+  padding: 12px;
+}
+
+/* header inside opened cat */
+.peq-catViewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.peq-catViewTitle {
+  font-weight: 900;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.peq-catCount {
+  color: rgba(15, 23, 42, 0.7);
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.peq-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 99px;
+  display: inline-block;
+}
+
+/* table */
+.peq-tableWrap {
+  overflow-x: auto;
+}
+
+.peq-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* ✅ ULTRA COMPACT MODE */
+.peq-tableUltraCompact .peq-thSm {
+  padding: 6px 8px;        /* ✅ moins haut */
+  font-size: 12px;
+}
+
+.peq-tableUltraCompact .peq-tdSm {
+  padding: 4px 8px;        /* ✅ beaucoup moins haut */
+}
+
+.peq-th {
+  text-align: left;
+  font-weight: 900;
+  color: rgba(15, 23, 42, 0.78);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.45);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.peq-thRight {
+  text-align: right;
+}
+
+.peq-td {
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  vertical-align: top;
+}
+
+.peq-tdRight {
+  text-align: right;
+}
+
+.peq-muted {
+  color: rgba(15, 23, 42, 0.55);
+}
+
+/* ✅ inputs ultra compacts */
+.peq-inputXs {
+  height: 28px;           /* ✅ très petit */
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 0 8px;
+  outline: none;
+  background: #fff;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 13px;
+}
+
+/* ✅ buttons ultra compacts */
+.peq-btnXs {
+  height: 28px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 10px;
+  background: #111827;
+  color: #fff;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.peq-ghostBtnXs {
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 10px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.peq-dangerBtnXs {
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  cursor: pointer;
+  font-weight: 900;
+  padding: 0 10px;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.peq-actionsRight {
+  display: flex;
+  gap: 6px; /* ✅ plus serré */
+  justify-content: flex-end;
+}
+
+.peq-eqNameSm {
+  font-weight: 900;
+  font-size: 13px;
+  line-height: 1.1; /* ✅ moins haut */
+}
+
+.peq-hintXs {
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px dashed rgba(15, 23, 42, 0.16);
+  background: rgba(255, 255, 255, 0.55);
+  color: rgba(15, 23, 42, 0.7);
+  font-size: 12px;
+}
+
+.peq-mt4 {
+  margin-top: 4px;
+}
+
+/* ✅ NEW: grille nouvelle catégorie (Nom + Emoji + Couleur + Ajouter) */
+.peq-gridNewCat {
+  display: grid;
+  grid-template-columns: 1fr 110px 110px auto;
+  gap: 8px;
+}
+
+/* ✅ NEW: input emoji */
+.peq-inputEmoji {
+  max-width: 110px;
+  text-align: center;
+  font-weight: 900;
+}
+
+/* ✅ NEW: version plus petite dans la liste des catégories */
+.peq-inputEmojiSmall {
+  height: 34px;
+  border-radius: 10px;
+  padding: 0 8px;
+}
+
+/* ✅ NEW: affichage emoji partout */
+.peq-emoji {
+  margin-right: 6px;
+}
+
+/* ✅ NEW: 2 boutons en haut à droite */
+.peq-rightBtns {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ✅ NEW: popover ajout équipement un peu plus large */
+.peq-popoverEq {
+  width: 520px;
+}
+
+/* ✅ NEW: layout ligne nom/catégorie/bouton */
+.peq-eqForm {
+  margin-top: 8px;
+}
+
+.peq-eqRow {
+  display: grid;
+  grid-template-columns: 1.3fr 1.1fr auto;
+  gap: 8px;
+  align-items: center;
+}

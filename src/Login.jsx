@@ -4,12 +4,23 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from "firebase/auth";
-import { auth } from "./firebaseConfig";
+import { auth, db } from "./firebaseConfig";
+
+import {
+  collection,
+  getDocs,
+  limit,
+  query,
+  updateDoc,
+  where,
+  serverTimestamp,
+} from "firebase/firestore";
 
 export default function Login() {
   const [mode, setMode] = useState("login"); // "login" | "register"
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
+  const [activationCode, setActivationCode] = useState(""); // ✅ NEW
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -20,6 +31,8 @@ export default function Login() {
 
     try {
       const cleanEmail = email.trim();
+      const cleanEmailLower = cleanEmail.toLowerCase().trim();
+      const cleanCode = (activationCode || "").toString().trim();
 
       if (!cleanEmail || !pass) {
         setErr("Entre un email et un mot de passe.");
@@ -28,12 +41,59 @@ export default function Login() {
 
       if (mode === "login") {
         await signInWithEmailAndPassword(auth, cleanEmail, pass);
-      } else {
-        await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+        return;
       }
-      // ✅ App.jsx va détecter l'utilisateur automatiquement via onAuthStateChanged
+
+      // ✅ REGISTER: on exige un code d'activation
+      if (!cleanCode) {
+        setErr("Entre ton code d’activation.");
+        return;
+      }
+
+      // 1) Vérifier que l'email existe dans employes + code match
+      const qEmp = query(
+        collection(db, "employes"),
+        where("emailLower", "==", cleanEmailLower),
+        limit(1)
+      );
+      const snap = await getDocs(qEmp);
+
+      if (snap.empty) {
+        setErr("Cet email n’est pas autorisé. Demande à un admin de t’ajouter.");
+        return;
+      }
+
+      const empDoc = snap.docs[0];
+      const emp = empDoc.data() || {};
+
+      const expectedCode = (emp.activationCode || "").toString().trim();
+      const alreadyActivated = !!emp.uid;
+
+      if (alreadyActivated) {
+        setErr("Ce compte est déjà activé. Essaie de te connecter.");
+        return;
+      }
+
+      if (!expectedCode || expectedCode !== cleanCode) {
+        setErr("Code d’activation invalide.");
+        return;
+      }
+
+      // 2) Créer le user Auth
+      const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+
+      // 3) Lier le uid dans Firestore + marquer activé
+      await updateDoc(empDoc.ref, {
+        uid: cred.user.uid,
+        activatedAt: serverTimestamp(),
+        // Option: on efface le code après activation (plus sécuritaire)
+        activationCode: null,
+        email: cleanEmail,
+        emailLower: cleanEmailLower,
+      });
+
+      // ✅ App.jsx va détecter via onAuthStateChanged
     } catch (error) {
-      // Messages plus lisibles
       const code = error?.code || "";
       if (code === "auth/invalid-credential") setErr("Email ou mot de passe invalide.");
       else if (code === "auth/user-not-found") setErr("Aucun compte avec cet email.");
@@ -74,6 +134,20 @@ export default function Login() {
             type="password"
             autoComplete={mode === "login" ? "current-password" : "new-password"}
           />
+
+          {/* ✅ Code d'activation seulement en mode register */}
+          {mode === "register" && (
+            <>
+              <label style={styles.label}>Code d’activation</label>
+              <input
+                style={styles.input}
+                value={activationCode}
+                onChange={(e) => setActivationCode(e.target.value)}
+                placeholder="ex: 483921"
+                autoComplete="one-time-code"
+              />
+            </>
+          )}
 
           <button style={styles.btn} disabled={loading}>
             {loading

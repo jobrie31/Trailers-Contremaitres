@@ -1,7 +1,11 @@
 /* src/PageTrailers.css */
 
+/* =========================
+   PAGE + LAYOUT
+   ========================= */
 .pt-page{
   padding: 14px;
+  padding-top: 0px;   /* ✅ collé en haut */
 }
 
 .pt-header{
@@ -28,10 +32,13 @@
   font-size: 13px;
 }
 
+/* ✅ (doublon retiré) - on laisse UNE seule définition ici */
 .pt-headerActions{
   display:flex;
   gap:10px;
   align-items:center;
+  margin-left: auto;
+  justify-content: flex-end;
 }
 
 .pt-grid{
@@ -40,6 +47,9 @@
   gap: 12px;
 }
 
+/* =========================
+   CARDS
+   ========================= */
 .pt-card{
   background:#fff;
   border:1px solid rgba(15,23,42,0.10);
@@ -58,17 +68,21 @@
 
 .pt-detailTitle{
   margin: 2px 0 12px;
-  font-size: 28px;      /* gros gros */
+  font-size: 28px;
   font-weight: 1000;
 }
 
+/* =========================
+   FORMS / INPUTS / BUTTONS
+   ========================= */
 .pt-formRow{
   display:grid;
   gap: 8px;
   margin-bottom: 10px;
 }
 
-.pt-input, .pt-select{
+.pt-input,
+.pt-select{
   height: 42px;
   border-radius: 12px;
   border: 1px solid rgba(15,23,42,0.10);
@@ -111,13 +125,15 @@
 }
 
 .pt-btnDanger{
-  height: 34px;
-  width: 42px;
-  border-radius: 12px;
+  height: 24px;                  /* ✅ compact (ne gonfle pas les lignes) */
+  width: 34px;
+  border-radius: 10px;
   border: 1px solid rgba(239,68,68,0.35);
   background: rgba(239,68,68,0.12);
   cursor: pointer;
   font-weight: 1000;
+  padding: 0;
+  line-height: 1;
 }
 
 .pt-btnDangerWide{
@@ -130,6 +146,9 @@
   padding: 0 14px;
 }
 
+/* =========================
+   LISTE TRAILERS (LEFT)
+   ========================= */
 .pt-list{
   display:grid;
   gap: 8px;
@@ -164,13 +183,28 @@
   font-weight: 800;
 }
 
+/* =========================
+   SECTIONS / CATEGORIES (RIGHT)
+   ========================= */
+
+/* ✅ messages vides = plus compacts */
 .pt-empty{
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px dashed rgba(15,23,42,0.12);
-  background: rgba(15,23,42,0.03);
-  color: rgba(15,23,42,0.65);
-  font-weight: 800;
+  padding: 6px 8px;                     /* ✅ moins haut */
+  border-radius: 10px;
+  border: 1px dashed rgba(15,23,42,0.14);
+  background: rgba(15,23,42,0.02);
+  color: rgba(15,23,42,0.60);
+  font-weight: 750;
+  font-size: 12px;
+  line-height: 1.1;
+}
+
+/* ✅ version mini (si tu veux l'utiliser quelque part) */
+.pt-emptyMini{
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.05;
+  font-weight: 700;
 }
 
 .pt-cats{
@@ -195,18 +229,18 @@
   font-weight: 950;
 }
 
-.pt-catRight{
-  display:flex;
-  align-items:center;
-  gap: 10px;
-}
-
 .pt-catMeta{
   color: rgba(15,23,42,0.65);
   font-weight: 900;
   font-size: 12px;
 }
 
+/* (Anciennes classes gardées si jamais utilisées ailleurs) */
+.pt-catRight{
+  display:flex;
+  align-items:center;
+  gap: 10px;
+}
 .pt-catAddBtn{
   height: 34px;
   width: 34px;
@@ -219,13 +253,15 @@
   line-height: 32px;
 }
 
+/* =========================
+   ITEMS (si jamais tu réutilises un mode "liste" un jour)
+   ========================= */
 .pt-items{
   margin-top: 10px;
   display:grid;
   gap: 8px;
 }
 
-/* ✅ plus compact */
 .pt-itemRow{
   display:grid;
   align-items:center;
@@ -259,7 +295,6 @@
   color: rgba(15,23,42,0.80);
 }
 
-/* ✅ sous-ligne des sous-catégories */
 .pt-itemSub{
   margin-top: 2px;
   font-size: 12px;
@@ -268,7 +303,9 @@
   line-height: 1.15;
 }
 
-/* ---------------- MODALS ---------------- */
+/* =========================
+   MODALS
+   ========================= */
 .pt-modalOverlay{
   position: fixed;
   inset: 0;
@@ -377,32 +414,23 @@
   margin-top: 10px;
 }
 
-/* ✅ Enlever les petites flèches (spinners) */
+/* ✅ Enlever les flèches (spinners) sur input number */
+.pt-noSpin{
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
 .pt-noSpin::-webkit-outer-spin-button,
 .pt-noSpin::-webkit-inner-spin-button{
   -webkit-appearance: none;
   margin: 0;
 }
-.pt-noSpin{
-  appearance: textfield;      /* standard */
-  -moz-appearance: textfield; /* firefox */
-}
 
-/* enlever les flèches (spinners) sur input number + fix vendorPrefix warning */
-.pt-noSpin {
-  appearance: textfield;      /* ✅ standard */
-  -moz-appearance: textfield;
-}
-.pt-noSpin::-webkit-outer-spin-button,
-.pt-noSpin::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-/* ---------------- TABLE (compact) ---------------- */
+/* =========================
+   TABLE (ULTRA COMPACT)
+   ========================= */
 .pt-tableWrap{
   overflow-x: auto;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .pt-table{
@@ -416,8 +444,8 @@
 
 .pt-th{
   text-align: left;
-  padding: 6px 8px;              /* ✅ moins haut */
-  font-size: 12px;               /* ✅ plus petit */
+  padding: 4px 6px;
+  font-size: 11px;
   font-weight: 950;
   color: rgba(15,23,42,0.75);
   border-bottom: 1px solid rgba(15,23,42,0.12);
@@ -426,85 +454,136 @@
   top: 0;
   z-index: 1;
   white-space: nowrap;
-  line-height: 1.1;              /* ✅ compact */
+  line-height: 1.05;
+  vertical-align: middle;
 }
 
 .pt-td{
-  padding: 6px 8px;              /* ✅ moins haut */
+  padding: 3px 6px;
   border-bottom: 1px solid rgba(15,23,42,0.08);
-  vertical-align: top;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 800;
-  line-height: 1.1;              /* ✅ compact */
+  line-height: 1.05;
+  vertical-align: middle;
 }
 
-/* Hover + zebra (optionnel mais nice) */
+/* Nom (div dans 1ère colonne) compact */
+.pt-td > div{
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.05;
+  margin: 0;
+}
+
+/* Hover + zebra */
 .pt-table tbody tr:hover td{
   background: rgba(15,23,42,0.03);
 }
-
 .pt-table tbody tr:nth-child(even) td{
   background: rgba(255,255,255,0.55);
 }
 
-/* ===========================
-   TABLE (plus compact + texte un peu plus gros + centré)
-   =========================== */
-
-.pt-tableWrap{
-  overflow-x: auto;
-  margin-top: 8px; /* un peu moins */
+/* =========================
+   FIX: Recherche à côté du titre de la catégorie
+   ========================= */
+.pt-sectionHead{
+  align-items: center;
+  gap: 10px;
 }
 
-/* table */
-.pt-table{
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background: rgba(255,255,255,0.75);
-  border-radius: 12px;
+.pt-sectionLeft{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;           /* prend la place */
+  min-width: 0;      /* permet ellipsis / shrink */
+}
+
+.pt-sectionName{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;           /* le titre prend la place */
+  min-width: 0;
+  font-weight: 950;
+}
+
+.pt-sectionName span:last-child{
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* header compact */
-.pt-th{
-  padding: 8px 10px;          /* ✅ moins haut */
-  font-size: 13px;
-  font-weight: 950;
-  line-height: 1.1;
-  vertical-align: middle;     /* ✅ centré */
-}
-
-/* cellules compact + texte un peu plus gros + centré */
-.pt-td{
-  padding: 6px 10px;          /* ✅ diminue hauteur des cases */
-  font-size: 14px;            /* ✅ grossit un peu le texte */
-  font-weight: 850;
-  line-height: 1.15;
-  vertical-align: middle;     /* ✅ texte centré en hauteur */
-}
-
-/* le nom (1ère colonne) un poil plus gros encore */
-.pt-td > div{
-  font-size: 15px;
-  font-weight: 900;
-  line-height: 1.15;
-}
-
-/* centrer les badges / quantité dans la cellule */
-.pt-qtyBadge{
-  display: inline-flex;
-  align-items: center;        /* ✅ centre vertical */
-  justify-content: flex-end;
-  font-size: 14px;
-  font-weight: 950;
-  line-height: 1.1;
-}
-
-/* bouton X un peu moins haut pour matcher */
-.pt-btnDanger{
-  height: 30px;               /* ✅ moins haut */
-  width: 40px;
+/* IMPORTANT: override le width:100% de .pt-input */
+.pt-catSearch{
+  width: 220px !important;   /* fixe à côté */
+  flex: 0 0 220px !important;
+  height: 34px !important;
   border-radius: 12px;
-  font-weight: 1000;
+}
+
+/* =========================
+   FIX: Scroll vertical max ~10 items
+   ========================= */
+.pt-tableWrapScroll10{
+  max-height: 420px !important;      /* ajuste si tu veux plus/moins */
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+}
+
+/* si tu veux un scroll visible même sur Windows */
+.pt-tableWrapScroll10{
+  scrollbar-gutter: stable;
+}
+
+/* =========================
+   Titre trailer + recherche sur 1 ligne
+   ========================= */
+.pt-detailHead{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+  margin: 2px 0 12px;
+}
+
+.pt-detailTitleNoMargin{
+  margin: 0 !important;
+}
+
+/* input recherche à droite du nom */
+.pt-searchInline{
+  max-width: 420px;
+  flex: 0 0 420px;
+}
+
+/* si écran plus petit: ça wrap propre */
+@media (max-width: 900px){
+  .pt-detailHead{
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .pt-searchInline{
+    flex: 1 1 320px;
+    max-width: 100%;
+  }
+}
+
+/* =========================
+   ✅ Bouton "Faire un échange" FIXÉ marge GAUCHE de l'écran
+   (Remplace l'ancien pt-btnSwapFixedRight)
+   ========================= */
+.pt-btnSwapFixed{
+  position: fixed;
+  left: 18px;     /* ✅ marge gauche écran */
+  top: 92px;      /* ajuste selon ta barre du haut */
+  z-index: 80;
+}
+
+/* sur petits écrans: on le laisse respirer */
+@media (max-width: 900px){
+  .pt-btnSwapFixed{
+    left: 12px;
+    top: 86px;
+  }
 }
