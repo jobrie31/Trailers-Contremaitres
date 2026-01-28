@@ -5,7 +5,7 @@
    ========================= */
 .pt-page{
   padding: 14px;
-  padding-top: 0px;   /* ✅ collé en haut */
+  padding-top: 0px;
 }
 
 .pt-header{
@@ -32,7 +32,6 @@
   font-size: 13px;
 }
 
-/* ✅ (doublon retiré) - on laisse UNE seule définition ici */
 .pt-headerActions{
   display:flex;
   gap:10px;
@@ -125,7 +124,7 @@
 }
 
 .pt-btnDanger{
-  height: 24px;                  /* ✅ compact (ne gonfle pas les lignes) */
+  height: 24px;
   width: 34px;
   border-radius: 10px;
   border: 1px solid rgba(239,68,68,0.35);
@@ -186,10 +185,8 @@
 /* =========================
    SECTIONS / CATEGORIES (RIGHT)
    ========================= */
-
-/* ✅ messages vides = plus compacts */
 .pt-empty{
-  padding: 6px 8px;                     /* ✅ moins haut */
+  padding: 6px 8px;
   border-radius: 10px;
   border: 1px dashed rgba(15,23,42,0.14);
   background: rgba(15,23,42,0.02);
@@ -199,7 +196,6 @@
   line-height: 1.1;
 }
 
-/* ✅ version mini (si tu veux l'utiliser quelque part) */
 .pt-emptyMini{
   padding: 4px 8px;
   font-size: 11px;
@@ -235,72 +231,163 @@
   font-size: 12px;
 }
 
-/* (Anciennes classes gardées si jamais utilisées ailleurs) */
-.pt-catRight{
+/* =========================
+   TABLE (ULTRA COMPACT)
+   ========================= */
+.pt-tableWrap{
+  overflow-x: auto;
+  margin-top: 6px;
+}
+
+.pt-table{
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: rgba(255,255,255,0.75);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.pt-th{
+  text-align: left;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 950;
+  color: rgba(15,23,42,0.75);
+  border-bottom: 1px solid rgba(15,23,42,0.12);
+  background: rgba(255,255,255,0.6);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  white-space: nowrap;
+  line-height: 1.05;
+  vertical-align: middle;
+}
+
+.pt-td{
+  padding: 3px 6px;
+  border-bottom: 1px solid rgba(15,23,42,0.08);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.05;
+  vertical-align: middle;
+}
+
+.pt-td > div{
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.05;
+  margin: 0;
+}
+
+.pt-table tbody tr:hover td{
+  background: rgba(15,23,42,0.03);
+}
+.pt-table tbody tr:nth-child(even) td{
+  background: rgba(255,255,255,0.55);
+}
+
+/* =========================
+   FIX: Recherche à côté du titre de la catégorie
+   ========================= */
+.pt-sectionHead{
+  align-items: center;
+  gap: 10px;
+}
+
+.pt-sectionLeft{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+}
+
+.pt-sectionName{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  font-weight: 950;
+}
+
+.pt-sectionName span:last-child{
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* override width:100% de .pt-input */
+.pt-catSearch{
+  width: 220px !important;
+  flex: 0 0 220px !important;
+  height: 34px !important;
+  border-radius: 12px;
+}
+
+.pt-sectionRight{
   display:flex;
   align-items:center;
   gap: 10px;
 }
-.pt-catAddBtn{
-  height: 34px;
-  width: 34px;
-  border-radius: 12px;
-  border: 1px solid rgba(15,23,42,0.12);
-  background: rgba(255,255,255,0.85);
-  cursor: pointer;
-  font-weight: 1000;
-  font-size: 18px;
-  line-height: 32px;
+
+/* =========================
+   FIX: Scroll vertical max ~10 items
+   ========================= */
+.pt-tableWrapScroll10{
+  max-height: 420px !important;
+  overflow-y: auto !important;
+  overflow-x: auto !important;
+  scrollbar-gutter: stable;
 }
 
 /* =========================
-   ITEMS (si jamais tu réutilises un mode "liste" un jour)
+   Titre trailer + recherche sur 1 ligne
    ========================= */
-.pt-items{
-  margin-top: 10px;
-  display:grid;
-  gap: 8px;
-}
-
-.pt-itemRow{
-  display:grid;
+.pt-detailHead{
+  display:flex;
   align-items:center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 14px;
-  border: 1px solid rgba(15,23,42,0.10);
-  background: rgba(255,255,255,0.75);
+  justify-content:space-between;
+  gap: 12px;
+  margin: 2px 0 12px;
 }
 
-.pt-itemRowCompact{
-  padding: 7px 10px;
+.pt-detailTitleNoMargin{
+  margin: 0 !important;
 }
 
-.pt-itemClickable{
-  cursor: pointer;
+.pt-searchInline{
+  max-width: 420px;
+  flex: 0 0 420px;
 }
 
-.pt-itemNameCompact{
-  min-width: 0;
+@media (max-width: 900px){
+  .pt-detailHead{
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .pt-searchInline{
+    flex: 1 1 320px;
+    max-width: 100%;
+  }
 }
 
-.pt-itemUnit{
-  font-weight: 900;
-  color: rgba(15,23,42,0.55);
+/* =========================
+   Bouton échange fixé
+   ========================= */
+.pt-btnSwapFixed{
+  position: fixed;
+  left: 18px;
+  top: 92px;
+  z-index: 80;
 }
 
-.pt-qtyBadge{
-  text-align: right;
-  font-weight: 900;
-  color: rgba(15,23,42,0.80);
-}
-
-.pt-itemSub{
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 850;
-  color: rgba(15,23,42,0.65);
-  line-height: 1.15;
+@media (max-width: 900px){
+  .pt-btnSwapFixed{
+    left: 12px;
+    top: 86px;
+  }
 }
 
 /* =========================
@@ -414,7 +501,7 @@
   margin-top: 10px;
 }
 
-/* ✅ Enlever les flèches (spinners) sur input number */
+/* ✅ Enlever spinners input number */
 .pt-noSpin{
   appearance: textfield;
   -moz-appearance: textfield;
@@ -426,164 +513,335 @@
 }
 
 /* =========================
-   TABLE (ULTRA COMPACT)
+   DRAG & DROP (items)
    ========================= */
-.pt-tableWrap{
-  overflow-x: auto;
-  margin-top: 6px;
+.pt-draggableRow{
+  cursor: grab;
 }
-
-.pt-table{
-  width: 100%;
-  border-collapse: separate;
-  border-spacing: 0;
-  background: rgba(255,255,255,0.75);
-  border-radius: 12px;
-  overflow: hidden;
+.pt-draggableRow:active{
+  cursor: grabbing;
 }
-
-.pt-th{
-  text-align: left;
-  padding: 4px 6px;
-  font-size: 11px;
-  font-weight: 950;
-  color: rgba(15,23,42,0.75);
-  border-bottom: 1px solid rgba(15,23,42,0.12);
-  background: rgba(255,255,255,0.6);
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  white-space: nowrap;
-  line-height: 1.05;
-  vertical-align: middle;
+.pt-dragHandle{
+  opacity: 0.55;
+  font-weight: 1000;
+  line-height: 1;
+  user-select: none;
 }
-
-.pt-td{
-  padding: 3px 6px;
-  border-bottom: 1px solid rgba(15,23,42,0.08);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.05;
-  vertical-align: middle;
-}
-
-/* Nom (div dans 1ère colonne) compact */
-.pt-td > div{
-  font-size: 12px;
-  font-weight: 950;
-  line-height: 1.05;
-  margin: 0;
-}
-
-/* Hover + zebra */
-.pt-table tbody tr:hover td{
-  background: rgba(15,23,42,0.03);
-}
-.pt-table tbody tr:nth-child(even) td{
-  background: rgba(255,255,255,0.55);
+.pt-draggableRow:hover .pt-dragHandle{
+  opacity: 0.9;
 }
 
 /* =========================
-   FIX: Recherche à côté du titre de la catégorie
+   Bris / Réparation (Rail droite) — UI PRO
    ========================= */
-.pt-sectionHead{
-  align-items: center;
-  gap: 10px;
-}
-
-.pt-sectionLeft{
-  display: flex;
-  align-items: center;
+.pr-rail{
+  display: grid;
   gap: 12px;
-  flex: 1;           /* prend la place */
-  min-width: 0;      /* permet ellipsis / shrink */
+
+  /* ✅ FIX: pousse le panneau plus à droite (vers le bord de la page) */
+  transform: translateX(200px);
 }
 
-.pt-sectionName{
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: 1;           /* le titre prend la place */
-  min-width: 0;
+/* Card de base */
+.pr-card{
+  background:#fff;
+  border:1px solid rgba(15,23,42,0.10);
+  border-radius:16px;
+  padding: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.06);
+}
+
+.pr-headTop{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap: 12px;
+}
+
+.pr-title{
+  font-size: 16px;
+  font-weight: 1000;
+  line-height: 1.1;
+}
+
+.pr-sub{
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(15,23,42,0.70);
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.pr-badges{
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pr-pill{
+  display:inline-flex;
+  align-items:center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
   font-weight: 950;
+  font-size: 12px;
+  border: 1px solid rgba(15,23,42,0.10);
+  background: rgba(15,23,42,0.02);
 }
 
-.pt-sectionName span:last-child{
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.pr-pillRed{
+  border-color: rgba(239,68,68,0.30);
+  background: rgba(239,68,68,0.10);
+  color: rgba(127,29,29,0.95);
 }
 
-/* IMPORTANT: override le width:100% de .pt-input */
-.pt-catSearch{
-  width: 220px !important;   /* fixe à côté */
-  flex: 0 0 220px !important;
-  height: 34px !important;
-  border-radius: 12px;
+.pr-pillAmber{
+  border-color: rgba(245,158,11,0.30);
+  background: rgba(245,158,11,0.10);
+  color: rgba(120,53,15,0.95);
 }
 
-/* =========================
-   FIX: Scroll vertical max ~10 items
-   ========================= */
-.pt-tableWrapScroll10{
-  max-height: 420px !important;      /* ajuste si tu veux plus/moins */
-  overflow-y: auto !important;
-  overflow-x: auto !important;
+/* Dropzone */
+.pr-dropZone{
+  margin-top: 10px;
+  border: 2px dashed rgba(15,23,42,0.18);
+  background: rgba(15,23,42,0.02);
+  border-radius: 16px;
+  padding: 12px;
+  display:flex;
+  gap: 12px;
+  align-items:center;
+  user-select: none;
+  transition: 120ms ease;
 }
 
-/* si tu veux un scroll visible même sur Windows */
-.pt-tableWrapScroll10{
-  scrollbar-gutter: stable;
+.pr-dropZoneOver{
+  border-color: rgba(79,70,229,0.55);
+  background: rgba(79,70,229,0.08);
+  transform: translateY(-1px);
 }
 
-/* =========================
-   Titre trailer + recherche sur 1 ligne
-   ========================= */
-.pt-detailHead{
+.pr-dropZoneDisabled{
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pr-dropIcon{
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-weight: 1000;
+  background: rgba(15,23,42,0.06);
+}
+
+.pr-dropText{
+  min-width: 0;
+}
+
+.pr-dropTitle{
+  font-weight: 1000;
+}
+
+.pr-dropHint{
+  margin-top: 2px;
+  font-size: 12px;
+  color: rgba(15,23,42,0.65);
+  font-weight: 850;
+}
+
+/* Form ajout manuel */
+.pr-form{
+  margin-top: 10px;
+  display:grid;
+  grid-template-columns: 1fr 90px auto;
+  gap: 10px;
+  align-items:center;
+}
+
+.pr-inputTight{
+  height: 38px !important;
+  border-radius: 14px;
+}
+
+.pr-inputQty{
+  height: 38px !important;
+  border-radius: 14px;
+  text-align: center;
+  font-weight: 1000 !important;
+}
+
+.pr-btnTight{
+  height: 38px !important;
+  border-radius: 14px;
+  padding: 0 12px !important;
+}
+
+/* Sections */
+.pr-sectionHead{
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap: 12px;
-  margin: 2px 0 12px;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
-.pt-detailTitleNoMargin{
-  margin: 0 !important;
+.pr-sectionTitle{
+  display:flex;
+  align-items:center;
+  gap: 8px;
+  font-weight: 1000;
 }
 
-/* input recherche à droite du nom */
-.pt-searchInline{
-  max-width: 420px;
-  flex: 0 0 420px;
+.pr-sectionMeta{
+  font-size: 12px;
+  color: rgba(15,23,42,0.65);
+  font-weight: 900;
 }
 
-/* si écran plus petit: ça wrap propre */
+.pr-dot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.pr-dotRed{ background: rgba(239,68,68,0.95); }
+.pr-dotAmber{ background: rgba(245,158,11,0.95); }
+
+.pr-empty{
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px dashed rgba(15,23,42,0.14);
+  background: rgba(15,23,42,0.02);
+  font-weight: 850;
+  color: rgba(15,23,42,0.60);
+}
+
+/* Liste */
+.pr-list{
+  display:grid;
+  gap: 8px;
+}
+
+.pr-row{
+  border: 1px solid rgba(15,23,42,0.10);
+  background: rgba(255,255,255,0.85);
+  border-radius: 14px;
+  padding: 10px;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap: 10px;
+}
+
+.pr-rowMain{
+  min-width: 0;
+}
+
+.pr-rowName{
+  font-weight: 1000;
+  line-height: 1.15;
+}
+
+.pr-rowMeta{
+  margin-top: 4px;
+  font-size: 12px;
+  color: rgba(15,23,42,0.70);
+  font-weight: 850;
+}
+
+.pr-rowActions{
+  display:flex;
+  gap: 8px;
+  align-items:center;
+  flex: 0 0 auto;
+}
+
+/* Boutons rail */
+.pr-btn{
+  height: 34px;
+  border-radius: 12px;
+  border: none;
+  cursor: pointer;
+  font-weight: 950;
+  padding: 0 10px;
+  background: #111827;
+  color: #fff;
+}
+
+.pr-btnGhost{
+  background:#fff;
+  color:#111827;
+  border: 1px solid rgba(15,23,42,0.14);
+}
+
+.pr-btnDanger{
+  background: rgba(239,68,68,0.10);
+  color: rgba(127,29,29,0.95);
+  border: 1px solid rgba(239,68,68,0.35);
+  width: 40px;
+  padding: 0;
+}
+
+/* Meta réparation */
+.pr-repairMeta{
+  margin-top: 6px;
+  display:flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pr-miniPill{
+  display:inline-flex;
+  align-items:center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  border: 1px solid rgba(15,23,42,0.10);
+  background: rgba(15,23,42,0.03);
+  color: rgba(15,23,42,0.75);
+}
+
+.pr-note{
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 900;
+  color: rgba(15,23,42,0.70);
+  line-height: 1.25;
+}
+
+/* Modal grid */
+.pr-modalGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.pr-span2{
+  grid-column: span 2;
+}
+
+/* Responsive rail */
 @media (max-width: 900px){
-  .pt-detailHead{
-    flex-wrap: wrap;
-    align-items: flex-start;
+  .pr-rail{
+    transform: translateX(0); /* ✅ pas de décalage sur mobile */
   }
-  .pt-searchInline{
-    flex: 1 1 320px;
-    max-width: 100%;
+
+  .pr-form{
+    grid-template-columns: 1fr 90px;
   }
-}
-
-/* =========================
-   ✅ Bouton "Faire un échange" FIXÉ marge GAUCHE de l'écran
-   (Remplace l'ancien pt-btnSwapFixedRight)
-   ========================= */
-.pt-btnSwapFixed{
-  position: fixed;
-  left: 18px;     /* ✅ marge gauche écran */
-  top: 92px;      /* ajuste selon ta barre du haut */
-  z-index: 80;
-}
-
-/* sur petits écrans: on le laisse respirer */
-@media (max-width: 900px){
-  .pt-btnSwapFixed{
-    left: 12px;
-    top: 86px;
+  .pr-btnTight{
+    grid-column: 1 / -1;
+  }
+  .pr-modalGrid{
+    grid-template-columns: 1fr;
+  }
+  .pr-span2{
+    grid-column: span 1;
   }
 }

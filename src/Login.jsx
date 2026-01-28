@@ -14,13 +14,15 @@ import {
   updateDoc,
   where,
   serverTimestamp,
+  doc,
+  setDoc,
 } from "firebase/firestore";
 
 export default function Login() {
   const [mode, setMode] = useState("login"); // "login" | "register"
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
-  const [activationCode, setActivationCode] = useState(""); // ✅ NEW
+  const [activationCode, setActivationCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
@@ -44,7 +46,7 @@ export default function Login() {
         return;
       }
 
-      // ✅ REGISTER: on exige un code d'activation
+      // ✅ REGISTER: code d'activation requis
       if (!cleanCode) {
         setErr("Entre ton code d’activation.");
         return;
@@ -79,20 +81,51 @@ export default function Login() {
         return;
       }
 
+      const empIsAdmin = !!emp.isAdmin;
+
       // 2) Créer le user Auth
       const cred = await createUserWithEmailAndPassword(auth, cleanEmail, pass);
+      const uid = cred.user.uid;
 
       // 3) Lier le uid dans Firestore + marquer activé
       await updateDoc(empDoc.ref, {
-        uid: cred.user.uid,
+        uid,
         activatedAt: serverTimestamp(),
-        // Option: on efface le code après activation (plus sécuritaire)
         activationCode: null,
         email: cleanEmail,
         emailLower: cleanEmailLower,
       });
 
-      // ✅ App.jsx va détecter via onAuthStateChanged
+      // ✅ users/{uid} : associe trailerId seulement si NON-admin
+      const trailerId = empIsAdmin ? null : uid;
+
+      await setDoc(
+        doc(db, "users", uid),
+        {
+          uid,
+          email: cleanEmailLower,
+          isAdmin: empIsAdmin,
+          trailerId, // null si admin
+          updatedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // ✅ Créer le trailer seulement si NON-admin
+      if (!empIsAdmin) {
+        await setDoc(
+          doc(db, "trailers", uid),
+          {
+            trailerNom: `Trailer — ${emp.nom || cleanEmail}`,
+            ownerUid: uid,
+            createdAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      // App.jsx détecte via onAuthStateChanged
     } catch (error) {
       const code = error?.code || "";
       if (code === "auth/invalid-credential") setErr("Email ou mot de passe invalide.");
@@ -135,7 +168,6 @@ export default function Login() {
             autoComplete={mode === "login" ? "current-password" : "new-password"}
           />
 
-          {/* ✅ Code d'activation seulement en mode register */}
           {mode === "register" && (
             <>
               <label style={styles.label}>Code d’activation</label>

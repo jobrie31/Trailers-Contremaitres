@@ -1,10 +1,12 @@
 // src/PageTrailers.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   orderBy,
@@ -14,8 +16,10 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { db } from "./firebaseConfig";
+import { auth, db } from "./firebaseConfig";
 import "./PageTrailers.css";
+
+import PanelReparations from "./PanelReparations";
 
 /* ---------- Color helpers (uses categories.color) ---------- */
 const DEFAULT_COLOR = "#4F46E5";
@@ -57,7 +61,6 @@ function isUniteLabel(label) {
 
 /**
  * label riche pour le dropdown "Ajouter équipement"
- * Exemple: "Sangle — Marque: X • Unité: pce • Modèle: Y"
  */
 function optionLabelForEquipement(eq, catsGlobal) {
   const head = (eq?.nom || "").trim() || "—";
@@ -91,38 +94,32 @@ function optionLabelForEquipement(eq, catsGlobal) {
 }
 
 export default function PageTrailers() {
+  const [meUid, setMeUid] = useState(null);
+  const [meIsAdmin, setMeIsAdmin] = useState(false);
+
   const [equipements, setEquipements] = useState([]);
   const [catsGlobal, setCatsGlobal] = useState([]); // [{id, nom, color, fields?}]
 
   const [trailers, setTrailers] = useState([]);
   const [selectedTrailerId, setSelectedTrailerId] = useState(null);
 
-  // Ajouter trailer
-  const [trailerNom, setTrailerNom] = useState("");
-
-  // subcollection trailers/{id}/categories => {id, nom, categorieId}
   const [categories, setCategories] = useState([]);
   const [itemsByCat, setItemsByCat] = useState({});
 
-  // 🔎 recherche globale
   const [search, setSearch] = useState("");
-
-  // 🔎 recherche par catégorie (catDocId => string)
   const [searchByCat, setSearchByCat] = useState({});
 
-  // ➕ modal ajout équipement
   const [showAddEquip, setShowAddEquip] = useState(false);
-  const [addCatGlobalId, setAddCatGlobalId] = useState(""); // fixé par bouton + de la catégorie
+  const [addCatGlobalId, setAddCatGlobalId] = useState("");
   const [addEquipId, setAddEquipId] = useState("");
-  const [addQty, setAddQty] = useState(""); // vide = obligatoire
+  const [addQty, setAddQty] = useState("");
 
-  // 🧮 modal ajuster quantité (clic item)
   const [qtyModalOpen, setQtyModalOpen] = useState(false);
   const [qtyModalCatId, setQtyModalCatId] = useState("");
   const [qtyModalItem, setQtyModalItem] = useState(null);
   const [qtyModalDelta, setQtyModalDelta] = useState(1);
 
-  // ------------------------- ÉCHANGE (modal) -------------------------
+  // -------- ÉCHANGE (admin only) --------
   const [showTrade, setShowTrade] = useState(false);
 
   const [tradeFromTrailerId, setTradeFromTrailerId] = useState("");
@@ -136,6 +133,31 @@ export default function PageTrailers() {
   const [tradeToCats, setTradeToCats] = useState([]);
   const [tradeToCatId, setTradeToCatId] = useState("");
 
+  // ✅ Anti “click modal” quand on vient de drag
+  const lastDragAtRef = useRef(0);
+
+  // ------------------------- Auth + Admin -------------------------
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setMeUid(u?.uid || null);
+
+      if (!u?.uid) {
+        setMeIsAdmin(false);
+        return;
+      }
+
+      try {
+        const snap = await getDoc(doc(db, "users", u.uid));
+        const data = snap.exists() ? snap.data() : {};
+        setMeIsAdmin(!!data?.isAdmin);
+      } catch (e) {
+        console.error("load users/{uid}:", e);
+        setMeIsAdmin(false);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   // ------------------------- Banque d’équipements -------------------------
   useEffect(() => {
     const qEq = query(collection(db, "equipements"), orderBy("createdAt", "desc"));
@@ -146,7 +168,7 @@ export default function PageTrailers() {
     );
   }, []);
 
-  // ------------------------- ✅ Catégories globales (collection "categories") -------------------------
+  // ------------------------- Catégories globales -------------------------
   useEffect(() => {
     const qC = query(collection(db, "categories"), orderBy("createdAt", "asc"));
     return onSnapshot(
@@ -162,7 +184,15 @@ export default function PageTrailers() {
 
   // ------------------------- Trailers -------------------------
   useEffect(() => {
-    const qT = query(collection(db, "trailers"), orderBy("createdAt", "desc"));
+    setTrailers([]);
+    setSelectedTrailerId(null);
+
+    if (!meUid) return;
+
+    const qT = meIsAdmin
+      ? query(collection(db, "trailers"), orderBy("createdAt", "desc"))
+      : query(collection(db, "trailers"), where("ownerUid", "==", meUid), orderBy("createdAt", "desc"));
+
     return onSnapshot(
       qT,
       (snap) => {
@@ -177,21 +207,20 @@ export default function PageTrailers() {
       (err) => console.error("trailers snapshot:", err)
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [meUid, meIsAdmin]);
 
   const selectedTrailer = useMemo(
     () => trailers.find((t) => t.id === selectedTrailerId) || null,
     [trailers, selectedTrailerId]
   );
 
-  // ------------------------- Categories du trailer sélectionné (subcollection) -------------------------
+  // ------------------------- Categories du trailer sélectionné -------------------------
   useEffect(() => {
     setCategories([]);
     setItemsByCat({});
     setSearch("");
     setSearchByCat({});
 
-    // reset modal add
     setShowAddEquip(false);
     setAddCatGlobalId("");
     setAddEquipId("");
@@ -207,7 +236,7 @@ export default function PageTrailers() {
     );
   }, [selectedTrailerId]);
 
-  // ------------------------- ✅ Sync: chaque trailer a TOUJOURS toutes les catégories globales -------------------------
+  // ------------------------- ✅ Sync: chaque trailer a toutes les catégories globales -------------------------
   async function ensureAllCategoriesForTrailer(trailerId) {
     if (!trailerId) return;
     if (catsGlobalSorted.length === 0) return;
@@ -255,7 +284,6 @@ export default function PageTrailers() {
         collection(db, "trailers", selectedTrailerId, "categories", cat.id, "items"),
         orderBy("createdAt", "asc")
       );
-
       const unsub = onSnapshot(
         qI,
         (snap) => {
@@ -264,7 +292,6 @@ export default function PageTrailers() {
         },
         (err) => console.error("items snapshot:", err)
       );
-
       unsubs.push(unsub);
     });
 
@@ -293,7 +320,6 @@ export default function PageTrailers() {
     const qGlobal = normalize(search);
     const perCat = normalize(searchByCat?.[catDocId] || "");
     const q = (qGlobal + " " + perCat).trim();
-
     if (!q) return items;
     return (items || []).filter((it) => normalize(it.nom).includes(q));
   }
@@ -338,7 +364,6 @@ export default function PageTrailers() {
       const u = (eq.unite || "").toString().trim();
       if (u) return u;
     }
-
     return "";
   }
 
@@ -349,26 +374,6 @@ export default function PageTrailers() {
   }
 
   // ------------------------- Actions -------------------------
-  async function ajouterTrailer(e) {
-    e.preventDefault();
-    const tn = trailerNom.trim();
-    if (!tn) return;
-
-    const ref = await addDoc(collection(db, "trailers"), {
-      trailerNom: tn,
-      createdAt: serverTimestamp(),
-    });
-
-    setTrailerNom("");
-    setSelectedTrailerId(ref.id);
-
-    try {
-      await ensureAllCategoriesForTrailer(ref.id);
-    } catch (err) {
-      console.error("ensure categories on create:", err);
-    }
-  }
-
   function openAddEquipModalForCategory(globalCatId) {
     if (!selectedTrailerId) return;
     setShowAddEquip(true);
@@ -451,7 +456,6 @@ export default function PageTrailers() {
     try {
       if (next <= 0) await deleteDoc(ref);
       else await updateDoc(ref, { qty: next });
-
       setQtyModalOpen(false);
     } catch (e) {
       console.error("applyQtyDelta:", e);
@@ -465,7 +469,7 @@ export default function PageTrailers() {
     await deleteDoc(doc(db, "trailers", selectedTrailerId, "categories", catId, "items", itemId));
   }
 
-  // ------------------------- ÉCHANGE helpers -------------------------
+  // ------------------------- ÉCHANGE helpers (admin only) -------------------------
   async function loadCatsForTrailer(trailerId) {
     if (!trailerId) return [];
     const qC = query(collection(db, "trailers", trailerId, "categories"), orderBy("createdAt", "asc"));
@@ -481,6 +485,8 @@ export default function PageTrailers() {
   }
 
   function openTradeModal() {
+    if (!meIsAdmin) return;
+
     const firstTrailer = selectedTrailerId || trailers[0]?.id || "";
     const secondTrailer = trailers.find((t) => t.id !== firstTrailer)?.id || firstTrailer;
 
@@ -573,6 +579,7 @@ export default function PageTrailers() {
   }
 
   async function effectuerEchange() {
+    if (!meIsAdmin) return;
     if (!tradeFromTrailerId || !tradeFromCatId || !tradeFromItemId) return alert("Choisis l’article à transférer.");
     if (!tradeToTrailerId || !tradeToCatId) return alert("Choisis le trailer de destination + catégorie.");
 
@@ -620,7 +627,6 @@ export default function PageTrailers() {
     }
   }
 
-  // ------------------------- Options ajout modal -------------------------
   const addEquipOptions = useMemo(() => {
     const gid = (addCatGlobalId || "").trim();
     if (!gid) return [];
@@ -628,7 +634,42 @@ export default function PageTrailers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addCatGlobalId, equipements]);
 
-  // ------------------------- Render -------------------------
+  // =========================
+  // ✅ Layout rail droite
+  // =========================
+  const railWidth = 420;
+  const railGap = 14;
+
+  // ✅ helper drag payload
+  function onDragStartItem(e, cat, it) {
+    if (!selectedTrailerId) return;
+    lastDragAtRef.current = Date.now();
+
+    const payload = {
+      type: "trailer_item",
+      trailerId: selectedTrailerId,
+      catId: cat.id,
+      catNom: cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie",
+      itemId: it.id,
+      nom: it.nom || "—",
+      unite: it.unite || "",
+      equipementId: it.equipementId || null,
+      qty: it.qty || 1,
+    };
+
+    try {
+      e.dataTransfer.setData("application/x-gyrotech-item", JSON.stringify(payload));
+      e.dataTransfer.setData("text/plain", JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = "copy";
+    } catch {}
+  }
+
+  function onClickRow(catId, it) {
+    // si on vient de drag, on ignore le click (évite d’ouvrir le modal)
+    if (Date.now() - (lastDragAtRef.current || 0) < 250) return;
+    openQtyModal(catId, it);
+  }
+
   return (
     <div className="pt-page">
       <div className="pt-header">
@@ -639,218 +680,227 @@ export default function PageTrailers() {
             </div>
 
             <div className="pt-headerActions">
-              <button
-                className="pt-btn pt-btnSwap pt-btnSwapFixed"
-                type="button"
-                onClick={openTradeModal}
-                disabled={trailers.length < 2}
-              >
-                Faire un échange
-              </button>
+              {meIsAdmin ? (
+                <button
+                  className="pt-btn pt-btnSwap pt-btnSwapFixed"
+                  type="button"
+                  onClick={openTradeModal}
+                  disabled={trailers.length < 2}
+                >
+                  Faire un échange
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="pt-grid">
-        {/* LEFT */}
-        <div className="pt-card">
-          <div className="pt-cardTitle">Liste des trailers</div>
+      {/* ✅ Layout 2 zones: contenu à gauche + rail collé à droite */}
+      <div style={{ display: "flex", alignItems: "flex-start", gap: railGap }}>
+        {/* MAIN */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="pt-grid">
+            {/* LEFT */}
+            <div className="pt-card">
+              <div className="pt-cardTitle">Liste des trailers</div>
 
-          <form className="pt-formRow" onSubmit={ajouterTrailer} style={{ gridTemplateColumns: "1fr auto" }}>
-            <input
-              className="pt-input"
-              placeholder="Nom (ex: Trailer 01 — Marc)"
-              value={trailerNom}
-              onChange={(e) => setTrailerNom(e.target.value)}
-            />
-            <button className="pt-btn" type="submit">
-              + Ajouter
-            </button>
-          </form>
-
-          <div className="pt-list">
-            {trailers.length === 0 ? (
-              <div className="pt-empty">Aucun trailer.</div>
-            ) : (
-              trailers.map((t) => {
-                const active = t.id === selectedTrailerId;
-                return (
-                  <div
-                    key={t.id}
-                    className={`pt-trailerRow ${active ? "pt-trailerRowActive" : ""}`}
-                    onClick={() => setSelectedTrailerId(t.id)}
-                  >
-                    <div>
-                      <div className="pt-trailerName">{t.trailerNom || "Sans nom"}</div>
-                      <div className="pt-trailerMeta">Clique pour ouvrir</div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {trailers.length < 2 && (
-            <div className="pt-footHint" style={{ marginTop: 10 }}>
-              Ajoute au moins 2 trailers pour utiliser “Faire un échange”.
-            </div>
-          )}
-        </div>
-
-        {/* RIGHT */}
-        <div className="pt-card">
-          {!selectedTrailer ? (
-            <div className="pt-empty">Choisis un trailer.</div>
-          ) : (
-            <>
-              {/* ✅ Titre + recherche sur la MÊME LIGNE */}
-              <div className="pt-detailHead">
-                <h2 className="pt-detailTitle pt-detailTitleNoMargin">
-                  {selectedTrailer.trailerNom}
-                </h2>
-
-                <input
-                  className="pt-input pt-search pt-searchInline"
-                  placeholder="Rechercher un équipement dans ce trailer…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  disabled={!selectedTrailerId}
-                />
-              </div>
-
-              {categoriesSorted.length === 0 ? (
-                <div className="pt-empty">Chargement des catégories…</div>
-              ) : (
-                <div className="pt-cats">
-                  {categoriesSorted.map((cat) => {
-                    const itemsAll = itemsByCat[cat.id] || [];
-                    const items = filterItems(itemsAll, cat.id);
-
-                    const qGlobal = (search || "").trim();
-                    const qLocal = (searchByCat?.[cat.id] || "").trim();
-                    if ((qGlobal || qLocal) && items.length === 0) return null;
-
-                    const base = catColorFromId(catsGlobal, cat.categorieId);
-                    const cols = fieldsForGlobalCatId(cat.categorieId);
-
+              <div className="pt-list">
+                {trailers.length === 0 ? (
+                  <div className="pt-empty">Aucun trailer.</div>
+                ) : (
+                  trailers.map((t) => {
+                    const active = t.id === selectedTrailerId;
                     return (
                       <div
-                        key={cat.id}
-                        className="pt-section"
-                        style={{
-                          background: withAlpha(base, 0.12),
-                          borderColor: withAlpha(base, 0.35),
-                        }}
+                        key={t.id}
+                        className={`pt-trailerRow ${active ? "pt-trailerRowActive" : ""}`}
+                        onClick={() => setSelectedTrailerId(t.id)}
                       >
-                        <div className="pt-sectionHead">
-                          <div className="pt-sectionLeft">
-                            <div className="pt-sectionName">
-                              <span aria-hidden="true" className="pt-dot" style={{ background: base }} />
-                              <span>{cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie"}</span>
-                            </div>
-
-                            <input
-                              className="pt-input pt-catSearch"
-                              placeholder="Rechercher…"
-                              value={searchByCat?.[cat.id] || ""}
-                              onChange={(e) => setSearchByCat((prev) => ({ ...prev, [cat.id]: e.target.value }))}
-                            />
-                          </div>
-
-                          <div className="pt-sectionRight">
-                            <div className="pt-catMeta">
-                              {itemsAll.length} item{itemsAll.length > 1 ? "s" : ""}
-                            </div>
-
-                            <button
-                              type="button"
-                              className="pt-btn"
-                              style={{ height: 32, padding: "0 10px" }}
-                              onClick={() => openAddEquipModalForCategory(cat.categorieId)}
-                              title="Ajouter un équipement dans cette catégorie"
-                              disabled={!selectedTrailerId}
-                            >
-                              +
-                            </button>
-                          </div>
+                        <div>
+                          <div className="pt-trailerName">{t.trailerNom || "Sans nom"}</div>
+                          <div className="pt-trailerMeta">Clique pour ouvrir</div>
                         </div>
-
-                        {itemsAll.length === 0 ? (
-                          <div className="pt-empty" style={{ marginTop: 10 }}>
-                            Aucun item dans cette catégorie.
-                          </div>
-                        ) : items.length === 0 ? (
-                          <div className="pt-empty" style={{ marginTop: 10 }}>
-                            Aucun résultat.
-                          </div>
-                        ) : (
-                          <div className="pt-tableWrap pt-tableWrapScroll10">
-                            <table className="pt-table">
-                              <thead>
-                                <tr>
-                                  <th className="pt-th">Nom</th>
-                                  {cols.map((f) => (
-                                    <th key={f.id} className="pt-th">
-                                      {f.nom}
-                                    </th>
-                                  ))}
-                                  <th className="pt-th" style={{ textAlign: "right" }}>
-                                    Qté
-                                  </th>
-                                  <th className="pt-th" style={{ textAlign: "right" }}>
-                                    Actions
-                                  </th>
-                                </tr>
-                              </thead>
-
-                              <tbody>
-                                {items.map((it) => {
-                                  return (
-                                    <tr
-                                      key={it.id}
-                                      style={{ cursor: "pointer" }}
-                                      onClick={() => openQtyModal(cat.id, it)}
-                                      title="Cliquer pour ajuster la quantité"
-                                    >
-                                      <td className="pt-td">
-                                        <div style={{ fontWeight: 900 }}>{it.nom || "—"}</div>
-                                      </td>
-
-                                      {cols.map((f) => {
-                                        const v = valueForItemField(it, f);
-                                        return (
-                                          <td key={f.id} className="pt-td">
-                                            {v ? v : <span style={{ opacity: 0.55 }}>—</span>}
-                                          </td>
-                                        );
-                                      })}
-
-                                      <td className="pt-td" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                                        <span className="pt-qtyBadge" style={{ display: "inline-flex", justifyContent: "flex-end" }}>
-                                          <span>{Number(it.qty || 0)}</span>
-                                        </span>
-                                      </td>
-
-                                      <td className="pt-td" style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                                        <button type="button" className="pt-btnDanger" onClick={() => supprimerItem(cat.id, it.id)}>
-                                          X
-                                        </button>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
                       </div>
                     );
-                  })}
+                  })
+                )}
+              </div>
+
+              {meIsAdmin && trailers.length < 2 && (
+                <div className="pt-footHint" style={{ marginTop: 10 }}>
+                  Ajoute au moins 2 trailers pour utiliser “Faire un échange”.
                 </div>
               )}
-            </>
-          )}
+            </div>
+
+            {/* RIGHT */}
+            <div className="pt-card">
+              {!selectedTrailer ? (
+                <div className="pt-empty">Choisis un trailer.</div>
+              ) : (
+                <>
+                  <div className="pt-detailHead">
+                    <h2 className="pt-detailTitle pt-detailTitleNoMargin">{selectedTrailer.trailerNom}</h2>
+
+                    <input
+                      className="pt-input pt-search pt-searchInline"
+                      placeholder="Rechercher un équipement dans ce trailer…"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      disabled={!selectedTrailerId}
+                    />
+                  </div>
+
+                  {categoriesSorted.length === 0 ? (
+                    <div className="pt-empty">Chargement des catégories…</div>
+                  ) : (
+                    <div className="pt-cats">
+                      {categoriesSorted.map((cat) => {
+                        const itemsAll = itemsByCat[cat.id] || [];
+                        const items = filterItems(itemsAll, cat.id);
+
+                        const qGlobal = (search || "").trim();
+                        const qLocal = (searchByCat?.[cat.id] || "").trim();
+                        if ((qGlobal || qLocal) && items.length === 0) return null;
+
+                        const base = catColorFromId(catsGlobal, cat.categorieId);
+                        const cols = fieldsForGlobalCatId(cat.categorieId);
+
+                        return (
+                          <div
+                            key={cat.id}
+                            className="pt-section"
+                            style={{
+                              background: withAlpha(base, 0.12),
+                              borderColor: withAlpha(base, 0.35),
+                            }}
+                          >
+                            <div className="pt-sectionHead">
+                              <div className="pt-sectionLeft">
+                                <div className="pt-sectionName">
+                                  <span aria-hidden="true" className="pt-dot" style={{ background: base }} />
+                                  <span>{cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie"}</span>
+                                </div>
+
+                                <input
+                                  className="pt-input pt-catSearch"
+                                  placeholder="Rechercher…"
+                                  value={searchByCat?.[cat.id] || ""}
+                                  onChange={(e) => setSearchByCat((prev) => ({ ...prev, [cat.id]: e.target.value }))}
+                                />
+                              </div>
+
+                              <div className="pt-sectionRight">
+                                <div className="pt-catMeta">
+                                  {itemsAll.length} item{itemsAll.length > 1 ? "s" : ""}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  className="pt-btn"
+                                  style={{ height: 32, padding: "0 10px" }}
+                                  onClick={() => openAddEquipModalForCategory(cat.categorieId)}
+                                  title="Ajouter un équipement dans cette catégorie"
+                                  disabled={!selectedTrailerId}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+
+                            {itemsAll.length === 0 ? (
+                              <div className="pt-empty" style={{ marginTop: 10 }}>
+                                Aucun item dans cette catégorie.
+                              </div>
+                            ) : items.length === 0 ? (
+                              <div className="pt-empty" style={{ marginTop: 10 }}>
+                                Aucun résultat.
+                              </div>
+                            ) : (
+                              <div className="pt-tableWrap pt-tableWrapScroll10">
+                                <table className="pt-table">
+                                  <thead>
+                                    <tr>
+                                      <th className="pt-th">Nom</th>
+                                      {cols.map((f) => (
+                                        <th key={f.id} className="pt-th">
+                                          {f.nom}
+                                        </th>
+                                      ))}
+                                      <th className="pt-th" style={{ textAlign: "right" }}>
+                                        Qté
+                                      </th>
+                                      <th className="pt-th" style={{ textAlign: "right" }}>
+                                        Actions
+                                      </th>
+                                    </tr>
+                                  </thead>
+
+                                  <tbody>
+                                    {items.map((it) => (
+                                      <tr
+                                        key={it.id}
+                                        className="pt-draggableRow"
+                                        draggable
+                                        onDragStart={(e) => onDragStartItem(e, cat, it)}
+                                        onClick={() => onClickRow(cat.id, it)}
+                                        title="Drag & drop vers Brisé/Réparation (ou clique pour ajuster la quantité)"
+                                      >
+                                        <td className="pt-td">
+                                          <div style={{ fontWeight: 900, display: "flex", alignItems: "center", gap: 8 }}>
+                                            <span className="pt-dragHandle" aria-hidden="true">⠿</span>
+                                            <span>{it.nom || "—"}</span>
+                                          </div>
+                                        </td>
+
+                                        {cols.map((f) => {
+                                          const v = valueForItemField(it, f);
+                                          return (
+                                            <td key={f.id} className="pt-td">
+                                              {v ? v : <span style={{ opacity: 0.55 }}>—</span>}
+                                            </td>
+                                          );
+                                        })}
+
+                                        <td className="pt-td" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                                          <span className="pt-qtyBadge" style={{ display: "inline-flex", justifyContent: "flex-end" }}>
+                                            <span>{Number(it.qty || 0)}</span>
+                                          </span>
+                                        </td>
+
+                                        <td className="pt-td" style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                                          <button type="button" className="pt-btnDanger" onClick={() => supprimerItem(cat.id, it.id)}>
+                                            X
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ✅ RIGHT RAIL */}
+        <div
+          style={{
+            width: railWidth,
+            flex: `0 0 ${railWidth}px`,
+            position: "sticky",
+            top: 12,
+            alignSelf: "flex-start",
+          }}
+        >
+          <PanelReparations trailerId={selectedTrailerId} isAdmin={meIsAdmin} equipements={equipements} />
         </div>
       </div>
 
@@ -959,8 +1009,8 @@ export default function PageTrailers() {
         </div>
       )}
 
-      {/* ---------------- MODAL ÉCHANGE ---------------- */}
-      {showTrade && (
+      {/* ---------------- MODAL ÉCHANGE (ADMIN) ---------------- */}
+      {showTrade && meIsAdmin && (
         <div className="pt-modalOverlay" onMouseDown={() => setShowTrade(false)}>
           <div className="pt-modal" onMouseDown={(e) => e.stopPropagation()}>
             <div className="pt-modalHead">
@@ -972,7 +1022,6 @@ export default function PageTrailers() {
 
             <div className="pt-modalBody">
               <div className="pt-modalGrid">
-                {/* FROM */}
                 <div className="pt-modalBlock">
                   <div className="pt-modalLabel">De</div>
 
@@ -986,14 +1035,11 @@ export default function PageTrailers() {
 
                   <select className="pt-select" value={tradeFromCatId} onChange={(e) => onChangeFromCat(e.target.value)}>
                     <option value="">Catégorie…</option>
-                    {tradeFromCats.map((c) => {
-                      const label = c.nom || catNameFromId(catsGlobal, c.categorieId) || "Catégorie";
-                      return (
-                        <option key={c.id} value={c.id}>
-                          {label}
-                        </option>
-                      );
-                    })}
+                    {tradeFromCats.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nom || catNameFromId(catsGlobal, c.categorieId) || "Catégorie"}
+                      </option>
+                    ))}
                   </select>
 
                   <select
@@ -1022,7 +1068,6 @@ export default function PageTrailers() {
                   />
                 </div>
 
-                {/* TO */}
                 <div className="pt-modalBlock">
                   <div className="pt-modalLabel">Vers</div>
 

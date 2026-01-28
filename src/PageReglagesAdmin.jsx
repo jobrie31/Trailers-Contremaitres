@@ -14,6 +14,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  setDoc,
 } from "firebase/firestore";
 
 function normEmail(s) {
@@ -61,11 +62,7 @@ export default function PageReglagesAdmin() {
         }
 
         // 1) Essayer de trouver mon doc par uid
-        const qMe = query(
-          collection(db, "employes"),
-          where("uid", "==", u.uid),
-          limit(1)
-        );
+        const qMe = query(collection(db, "employes"), where("uid", "==", u.uid), limit(1));
         let snapMe = await getDocs(qMe);
 
         if (!snapMe.empty) {
@@ -79,11 +76,7 @@ export default function PageReglagesAdmin() {
         // 2) Fallback par emailLower (auto-link si doc existe uid==null)
         const emailLower = (u.email || "").toLowerCase().trim();
         if (emailLower) {
-          const qByEmail = query(
-            collection(db, "employes"),
-            where("emailLower", "==", emailLower),
-            limit(1)
-          );
+          const qByEmail = query(collection(db, "employes"), where("emailLower", "==", emailLower), limit(1));
           const snapEmail = await getDocs(qByEmail);
 
           if (!snapEmail.empty) {
@@ -91,10 +84,7 @@ export default function PageReglagesAdmin() {
             const emp = empDoc.data() || {};
 
             if (!emp.uid) {
-              await updateDoc(empDoc.ref, {
-                uid: u.uid,
-                activatedAt: serverTimestamp(),
-              });
+              await updateDoc(empDoc.ref, { uid: u.uid, activatedAt: serverTimestamp() });
             }
 
             if (!alive) return;
@@ -120,6 +110,21 @@ export default function PageReglagesAdmin() {
             createdByUid: u.uid,
             bootstrap: true,
           });
+
+          // ✅ IMPORTANT: un admin n’a PAS de trailer
+          await setDoc(
+            doc(db, "users", u.uid),
+            {
+              uid: u.uid,
+              email: (u.email || "").toLowerCase().trim(),
+              isAdmin: true,
+              trailerId: null,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              bootstrap: true,
+            },
+            { merge: true }
+          );
 
           if (!alive) return;
           setMeIsAdmin(true);
@@ -177,12 +182,7 @@ export default function PageReglagesAdmin() {
       if (!cleanEmail || !cleanEmailLower.includes("@")) return setMsg("❌ Email invalide.");
       if (!cleanCode) return setMsg("❌ Code d’activation requis.");
 
-      // empêcher doublon email
-      const qExist = query(
-        collection(db, "employes"),
-        where("emailLower", "==", cleanEmailLower),
-        limit(1)
-      );
+      const qExist = query(collection(db, "employes"), where("emailLower", "==", cleanEmailLower), limit(1));
       const ex = await getDocs(qExist);
       if (!ex.empty) {
         setMsg("❌ Cet email existe déjà dans la liste.");
@@ -235,20 +235,47 @@ export default function PageReglagesAdmin() {
     }
   }
 
-  // ✅ SUPPRIMER EMPLOYÉ (désactivé si déjà activé)
+  // ✅ SUPPRIMER EMPLOYÉ (MAINTENANT: permis même si activé)
   async function supprimerEmploye(emp) {
     if (!emp?.id) return;
-    if (emp.uid) {
-      alert("Impossible de supprimer: ce compte est déjà activé (uid présent).");
+
+    const labelTxt = `${emp.nom || "—"} (${emp.email || "—"})`;
+    const active = !!emp.uid;
+
+    // sécurité: empêcher l'admin de se supprimer lui-même
+    const myUid = auth.currentUser?.uid || null;
+    if (active && myUid && emp.uid === myUid) {
+      alert("Impossible de supprimer ton propre compte admin.");
       return;
     }
 
-    const label = `${emp.nom || "—"} (${emp.email || "—"})`;
-    const ok = window.confirm(`Supprimer cet employé?\n\n${label}\n\n⚠️ Cette action est définitive.`);
+    const warn = active
+      ? `⚠️ ATTENTION: ce compte est DÉJÀ ACTIVÉ.\n\n` +
+        `Ça va supprimer le document employé + le user/trailer associés dans Firestore.\n` +
+        `⚠️ Ça NE supprime PAS l'utilisateur dans Firebase Auth (il existe encore techniquement).\n\n`
+      : "";
+
+    const ok = window.confirm(`Supprimer cet employé?\n\n${warn}${labelTxt}\n\nCette action est définitive.`);
     if (!ok) return;
 
     try {
+      // 1) supprimer employes/{id}
       await deleteDoc(doc(db, "employes", emp.id));
+
+      // 2) best-effort: supprimer users/{uid} + trailers/{uid} si uid présent
+      if (emp.uid) {
+        try {
+          await deleteDoc(doc(db, "users", emp.uid));
+        } catch (e1) {
+          console.warn("delete users failed:", e1);
+        }
+        try {
+          await deleteDoc(doc(db, "trailers", emp.uid));
+        } catch (e2) {
+          console.warn("delete trailer failed:", e2);
+        }
+      }
+
       alert("Employé supprimé.");
     } catch (e) {
       console.error("supprimerEmploye:", e);
@@ -331,6 +358,9 @@ export default function PageReglagesAdmin() {
             <tbody>
               {employesSorted.map((e) => {
                 const active = !!e.uid;
+                const myUid = auth.currentUser?.uid || null;
+                const isMe = !!myUid && !!e.uid && e.uid === myUid;
+
                 return (
                   <tr key={e.id}>
                     <td style={td}><b>{e.nom || "—"}</b></td>
@@ -342,6 +372,7 @@ export default function PageReglagesAdmin() {
                         checked={!!e.isAdmin}
                         onChange={(ev) => toggleAdmin(e.id, ev.target.checked)}
                         title="Admin"
+                        disabled={isMe} // évite de te retirer tes droits par accident
                       />
                     </td>
 
@@ -360,20 +391,20 @@ export default function PageReglagesAdmin() {
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button
                           type="button"
-                          style={{ ...btnGhost, height: 34 }}
+                          style={{ ...btnGhost, height: 34, opacity: active ? 0.45 : 1 }}
                           onClick={() => resetCode(e)}
-                          disabled={!!e.uid}
-                          title={e.uid ? "Déjà activé" : "Reset code"}
+                          disabled={active}
+                          title={active ? "Déjà activé" : "Reset code"}
                         >
                           Reset code
                         </button>
 
                         <button
                           type="button"
-                          style={{ ...btnDanger, height: 34, opacity: e.uid ? 0.45 : 1 }}
+                          style={{ ...btnDanger, height: 34, opacity: isMe ? 0.45 : 1 }}
                           onClick={() => supprimerEmploye(e)}
-                          disabled={!!e.uid}
-                          title={e.uid ? "Impossible: déjà activé" : "Supprimer"}
+                          disabled={isMe}
+                          title={isMe ? "Impossible: ton propre compte" : "Supprimer"}
                         >
                           Supprimer
                         </button>
