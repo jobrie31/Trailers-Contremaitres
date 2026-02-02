@@ -288,6 +288,43 @@
 }
 
 /* =========================
+   ✅ NOUVEAU: Nom produit + remarque (dans la même cellule)
+   ========================= */
+.pt-itemCell{
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pt-itemTop{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pt-itemName{
+  font-weight: 1000;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pt-itemRemark{
+  font-size: 12px;
+  font-weight: 850;
+  color: rgba(15,23,42,0.70);
+  line-height: 1.2;
+  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pt-itemRemarkEmpty{
+  opacity: 0.55;
+}
+
+/* =========================
    FIX: Recherche à côté du titre de la catégorie
    ========================= */
 .pt-sectionHead{

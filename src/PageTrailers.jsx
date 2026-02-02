@@ -373,6 +373,23 @@ export default function PageTrailers() {
     return (it?.nom || "").trim() || "—";
   }
 
+  // ✅ NOUVEAU: Remarque (on affiche ce qu'on trouve sans "sous-entendu")
+  function remarqueForTrailerItem(it) {
+    const eq = equipementById(it?.equipementId);
+
+    const pick = (...vals) => {
+      for (const v of vals) {
+        const s = (v ?? "").toString().trim();
+        if (s) return s;
+      }
+      return "";
+    };
+
+    // on lit plusieurs emplacements possibles, sans modifier la data
+    // (si ton champ s'appelle autrement, tu peux ajouter ici)
+    return pick(eq?.remarque, eq?.note, eq?.details?.remarque, eq?.details?.note, it?.remarque, it?.note);
+  }
+
   // ------------------------- Actions -------------------------
   function openAddEquipModalForCategory(globalCatId) {
     if (!selectedTrailerId) return;
@@ -569,7 +586,7 @@ export default function PageTrailers() {
     const tc = await loadCatsForTrailer(id);
     setTradeToCats(tc);
 
-    const fromCatObj = tradeFromCats.find((c) => c.id === tradeFromCatId);
+    const fromCatObj = tradeFromCats.find((c) => (c.id || "") === (tradeFromCatId || ""));
     if (fromCatObj) {
       const matchTo = tc.find((c) => (c.categorieId || "") === (fromCatObj.categorieId || ""));
       if (matchTo) setTradeToCatId(matchTo.id);
@@ -652,6 +669,7 @@ export default function PageTrailers() {
       catNom: cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie",
       itemId: it.id,
       nom: it.nom || "—",
+      remarque: remarqueForTrailerItem(it), // ✅ ajouté (si PanelReparations veut l'afficher)
       unite: it.unite || "",
       equipementId: it.equipementId || null,
       qty: it.qty || 1,
@@ -660,7 +678,7 @@ export default function PageTrailers() {
     try {
       e.dataTransfer.setData("application/x-gyrotech-item", JSON.stringify(payload));
       e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-      e.dataTransfer.effectAllowed = "copy";
+      e.dataTransfer.effectAllowed = "move"; // ✅ maintenant c'est cohérent (on retire du stock)
     } catch {}
   }
 
@@ -821,7 +839,7 @@ export default function PageTrailers() {
                                 <table className="pt-table">
                                   <thead>
                                     <tr>
-                                      <th className="pt-th">Nom</th>
+                                      <th className="pt-th">Produit / Remarque</th>
                                       {cols.map((f) => (
                                         <th key={f.id} className="pt-th">
                                           {f.nom}
@@ -837,44 +855,60 @@ export default function PageTrailers() {
                                   </thead>
 
                                   <tbody>
-                                    {items.map((it) => (
-                                      <tr
-                                        key={it.id}
-                                        className="pt-draggableRow"
-                                        draggable
-                                        onDragStart={(e) => onDragStartItem(e, cat, it)}
-                                        onClick={() => onClickRow(cat.id, it)}
-                                        title="Drag & drop vers Brisé/Réparation (ou clique pour ajuster la quantité)"
-                                      >
-                                        <td className="pt-td">
-                                          <div style={{ fontWeight: 900, display: "flex", alignItems: "center", gap: 8 }}>
-                                            <span className="pt-dragHandle" aria-hidden="true">⠿</span>
-                                            <span>{it.nom || "—"}</span>
-                                          </div>
-                                        </td>
+                                    {items.map((it) => {
+                                      const remarque = remarqueForTrailerItem(it);
+                                      return (
+                                        <tr
+                                          key={it.id}
+                                          className="pt-draggableRow"
+                                          draggable
+                                          onDragStart={(e) => onDragStartItem(e, cat, it)}
+                                          onClick={() => onClickRow(cat.id, it)}
+                                          title="Drag & drop vers Brisé/Réparation (ou clique pour ajuster la quantité)"
+                                        >
+                                          <td className="pt-td">
+                                            <div className="pt-itemCell">
+                                              <div className="pt-itemTop">
+                                                <span className="pt-dragHandle" aria-hidden="true">
+                                                  ⠿
+                                                </span>
+                                                <span className="pt-itemName">{it.nom || "—"}</span>
+                                              </div>
 
-                                        {cols.map((f) => {
-                                          const v = valueForItemField(it, f);
-                                          return (
-                                            <td key={f.id} className="pt-td">
-                                              {v ? v : <span style={{ opacity: 0.55 }}>—</span>}
-                                            </td>
-                                          );
-                                        })}
+                                              {remarque ? (
+                                                <div className="pt-itemRemark">{remarque}</div>
+                                              ) : (
+                                                <div className="pt-itemRemark pt-itemRemarkEmpty">—</div>
+                                              )}
+                                            </div>
+                                          </td>
 
-                                        <td className="pt-td" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                                          <span className="pt-qtyBadge" style={{ display: "inline-flex", justifyContent: "flex-end" }}>
-                                            <span>{Number(it.qty || 0)}</span>
-                                          </span>
-                                        </td>
+                                          {cols.map((f) => {
+                                            const v = valueForItemField(it, f);
+                                            return (
+                                              <td key={f.id} className="pt-td">
+                                                {v ? v : <span style={{ opacity: 0.55 }}>—</span>}
+                                              </td>
+                                            );
+                                          })}
 
-                                        <td className="pt-td" style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                                          <button type="button" className="pt-btnDanger" onClick={() => supprimerItem(cat.id, it.id)}>
-                                            X
-                                          </button>
-                                        </td>
-                                      </tr>
-                                    ))}
+                                          <td className="pt-td" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                                            <span
+                                              className="pt-qtyBadge"
+                                              style={{ display: "inline-flex", justifyContent: "flex-end" }}
+                                            >
+                                              <span>{Number(it.qty || 0)}</span>
+                                            </span>
+                                          </td>
+
+                                          <td className="pt-td" style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
+                                            <button type="button" className="pt-btnDanger" onClick={() => supprimerItem(cat.id, it.id)}>
+                                              X
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
@@ -900,7 +934,13 @@ export default function PageTrailers() {
             alignSelf: "flex-start",
           }}
         >
-          <PanelReparations trailerId={selectedTrailerId} isAdmin={meIsAdmin} equipements={equipements} />
+          <PanelReparations
+            trailerId={selectedTrailerId}
+            trailerNom={selectedTrailer?.trailerNom || ""}
+            isAdmin={meIsAdmin}
+            equipements={equipements}
+            catsGlobal={catsGlobal} // ✅ AJOUTÉ pour afficher "Caractéristique"
+          />
         </div>
       </div>
 
@@ -911,9 +951,7 @@ export default function PageTrailers() {
             <div className="pt-modalHead">
               <div className="pt-modalTitle">
                 Ajouter un équipement{" "}
-                <span style={{ opacity: 0.7, fontWeight: 900 }}>
-                  — {catNameFromId(catsGlobal, addCatGlobalId) || "Catégorie"}
-                </span>
+                <span style={{ opacity: 0.7, fontWeight: 900 }}>— {catNameFromId(catsGlobal, addCatGlobalId) || "Catégorie"}</span>
               </div>
               <button className="pt-modalClose" type="button" onClick={() => setShowAddEquip(false)}>
                 ✕
