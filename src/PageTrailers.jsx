@@ -385,8 +385,6 @@ export default function PageTrailers() {
       return "";
     };
 
-    // on lit plusieurs emplacements possibles, sans modifier la data
-    // (si ton champ s'appelle autrement, tu peux ajouter ici)
     return pick(eq?.remarque, eq?.note, eq?.details?.remarque, eq?.details?.note, it?.remarque, it?.note);
   }
 
@@ -651,12 +649,6 @@ export default function PageTrailers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addCatGlobalId, equipements]);
 
-  // =========================
-  // ✅ Layout rail droite
-  // =========================
-  const railWidth = 420;
-  const railGap = 14;
-
   // ✅ helper drag payload
   function onDragStartItem(e, cat, it) {
     if (!selectedTrailerId) return;
@@ -669,7 +661,7 @@ export default function PageTrailers() {
       catNom: cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie",
       itemId: it.id,
       nom: it.nom || "—",
-      remarque: remarqueForTrailerItem(it), // ✅ ajouté (si PanelReparations veut l'afficher)
+      remarque: remarqueForTrailerItem(it),
       unite: it.unite || "",
       equipementId: it.equipementId || null,
       qty: it.qty || 1,
@@ -678,12 +670,11 @@ export default function PageTrailers() {
     try {
       e.dataTransfer.setData("application/x-gyrotech-item", JSON.stringify(payload));
       e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-      e.dataTransfer.effectAllowed = "move"; // ✅ maintenant c'est cohérent (on retire du stock)
+      e.dataTransfer.effectAllowed = "move";
     } catch {}
   }
 
   function onClickRow(catId, it) {
-    // si on vient de drag, on ignore le click (évite d’ouvrir le modal)
     if (Date.now() - (lastDragAtRef.current || 0) < 250) return;
     openQtyModal(catId, it);
   }
@@ -713,10 +704,10 @@ export default function PageTrailers() {
         </div>
       </div>
 
-      {/* ✅ Layout 2 zones: contenu à gauche + rail collé à droite */}
-      <div style={{ display: "flex", alignItems: "flex-start", gap: railGap }}>
+      {/* ✅ Layout responsive (ordi: rail droite sticky, mobile: rail en haut) */}
+      <div className="pt-layout">
         {/* MAIN */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="pt-main">
           <div className="pt-grid">
             {/* LEFT */}
             <div className="pt-card">
@@ -901,8 +892,16 @@ export default function PageTrailers() {
                                             </span>
                                           </td>
 
-                                          <td className="pt-td" style={{ textAlign: "right" }} onClick={(e) => e.stopPropagation()}>
-                                            <button type="button" className="pt-btnDanger" onClick={() => supprimerItem(cat.id, it.id)}>
+                                          <td
+                                            className="pt-td"
+                                            style={{ textAlign: "right" }}
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            <button
+                                              type="button"
+                                              className="pt-btnDanger"
+                                              onClick={() => supprimerItem(cat.id, it.id)}
+                                            >
                                               X
                                             </button>
                                           </td>
@@ -924,34 +923,28 @@ export default function PageTrailers() {
           </div>
         </div>
 
-        {/* ✅ RIGHT RAIL */}
-        <div
-          style={{
-            width: railWidth,
-            flex: `0 0 ${railWidth}px`,
-            position: "sticky",
-            top: 12,
-            alignSelf: "flex-start",
-          }}
-        >
+        {/* RIGHT RAIL */}
+        <aside className="pt-railWrap">
           <PanelReparations
             trailerId={selectedTrailerId}
             trailerNom={selectedTrailer?.trailerNom || ""}
             isAdmin={meIsAdmin}
             equipements={equipements}
-            catsGlobal={catsGlobal} // ✅ AJOUTÉ pour afficher "Caractéristique"
+            catsGlobal={catsGlobal}
           />
-        </div>
+        </aside>
       </div>
 
       {/* ---------------- MODAL AJOUT ÉQUIPEMENT ---------------- */}
       {showAddEquip && (
-        <div className="pt-modalOverlay" onMouseDown={() => setShowAddEquip(false)}>
-          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="pt-modalOverlay" onClick={() => setShowAddEquip(false)}>
+          <div className="pt-modal pt-modalSmall" onClick={(e) => e.stopPropagation()}>
             <div className="pt-modalHead">
               <div className="pt-modalTitle">
                 Ajouter un équipement{" "}
-                <span style={{ opacity: 0.7, fontWeight: 900 }}>— {catNameFromId(catsGlobal, addCatGlobalId) || "Catégorie"}</span>
+                <span style={{ opacity: 0.7, fontWeight: 900 }}>
+                  — {catNameFromId(catsGlobal, addCatGlobalId) || "Catégorie"}
+                </span>
               </div>
               <button className="pt-modalClose" type="button" onClick={() => setShowAddEquip(false)}>
                 ✕
@@ -998,8 +991,8 @@ export default function PageTrailers() {
 
       {/* ---------------- MODAL AJUSTER QUANTITÉ ---------------- */}
       {qtyModalOpen && qtyModalItem && (
-        <div className="pt-modalOverlay" onMouseDown={() => setQtyModalOpen(false)}>
-          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="pt-modalOverlay" onClick={() => setQtyModalOpen(false)}>
+          <div className="pt-modal pt-modalSmall" onClick={(e) => e.stopPropagation()}>
             <div className="pt-modalHead">
               <div className="pt-modalTitle">Ajuster quantité</div>
               <button className="pt-modalClose" type="button" onClick={() => setQtyModalOpen(false)}>
@@ -1049,8 +1042,8 @@ export default function PageTrailers() {
 
       {/* ---------------- MODAL ÉCHANGE (ADMIN) ---------------- */}
       {showTrade && meIsAdmin && (
-        <div className="pt-modalOverlay" onMouseDown={() => setShowTrade(false)}>
-          <div className="pt-modal" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="pt-modalOverlay" onClick={() => setShowTrade(false)}>
+          <div className="pt-modal" onClick={(e) => e.stopPropagation()}>
             <div className="pt-modalHead">
               <div className="pt-modalTitle">Faire un échange</div>
               <button className="pt-modalClose" type="button" onClick={() => setShowTrade(false)}>

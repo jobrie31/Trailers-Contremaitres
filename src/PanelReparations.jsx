@@ -4,6 +4,7 @@ import { auth, db } from "./firebaseConfig";
 import {
   addDoc,
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   onSnapshot,
@@ -12,7 +13,10 @@ import {
   runTransaction,
   serverTimestamp,
   updateDoc,
+  setDoc,
 } from "firebase/firestore";
+
+import RepairTimelineModal from "./RepairTimelineModal";
 
 function shorten(s, max = 60) {
   const str = (s || "").toString().trim();
@@ -65,13 +69,6 @@ function optionLabelForEquipement(eq, catsGlobal) {
 export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, equipements, catsGlobal = [] }) {
   const [rows, setRows] = useState([]);
 
-  const [po, setPo] = useState("");
-  const [endroit, setEndroit] = useState("");
-  const [note, setNote] = useState("");
-
-  const [moveOpen, setMoveOpen] = useState(false);
-  const [moveRow, setMoveRow] = useState(null);
-
   const [dragOver, setDragOver] = useState(false);
 
   // ✅ Modal drop -> choisir quantité + destination (brisé / jeté)
@@ -89,31 +86,99 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
   const [suiviViewOpen, setSuiviViewOpen] = useState(false);
   const [suiviViewRow, setSuiviViewRow] = useState(null);
 
+  // ✅ Timeline modal
+  const [tlOpen, setTlOpen] = useState(false);
+  const [tlRow, setTlRow] = useState(null);
+
+  function openTimeline(r) {
+    setTlRow(r);
+    setTlOpen(true);
+  }
+  function closeTimeline() {
+    setTlOpen(false);
+    setTlRow(null);
+  }
+
+  // -------------------------
+  // Helpers trailerId/trailerNom par ligne (vue globale admin)
+  // -------------------------
+  function getRowTrailerId(r) {
+    if (isAdmin) return (r?.__trailerId || r?.trailerId || "").toString().trim() || null;
+    return (trailerId || "").toString().trim() || null;
+  }
+  function getRowTrailerNom(r) {
+    const tn = (r?.trailerNom || "").toString().trim();
+    if (tn) return tn;
+    const prop = (trailerNom || "").toString().trim();
+    return prop || "—";
+  }
+
+  // -------------------------
+  // ✅ Notifications helpers
+  // - on utilise notifications/{repId} (même id que la réparation)
+  // -------------------------
+  async function notifDone(repId, doneAction = "treated") {
+    const id = (repId || "").toString().trim();
+    if (!id) return;
+    try {
+      await updateDoc(doc(db, "notifications", id), {
+        done: true,
+        doneAt: serverTimestamp(),
+        doneByUid: auth.currentUser?.uid || null,
+        doneAction: doneAction || "treated",
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  async function notifOpenOrUpdate(repId, payload = {}) {
+    const id = (repId || "").toString().trim();
+    if (!id) return;
+    try {
+      await setDoc(
+        doc(db, "notifications", id),
+        {
+          targetRole: "admin",
+          done: false,
+          createdAt: serverTimestamp(),
+          createdByUid: auth.currentUser?.uid || null,
+          ...payload,
+        },
+        { merge: true }
+      );
+    } catch (e) {
+      console.error("notifOpenOrUpdate error:", e);
+    }
+  }
+
   // -------------------------
   // Historique helper
   // -------------------------
   async function logHistory(eventName, payload = {}) {
     try {
       const u = auth.currentUser;
+
+      const tId = (payload?.trailerId || trailerId || null) ?? null;
+      const tNom = (payload?.trailerNom || trailerNom || "—").toString().trim() || "—";
+
       await addDoc(collection(db, "reparations_history"), {
         ts: serverTimestamp(),
         trackId: payload?.trackId || null,
-        trailerId: trailerId || null,
-        trailerNom: (trailerNom || "").toString().trim() || payload?.trailerNom || "—",
-        byUid: u?.uid || null,
 
+        trailerId: tId,
+        trailerNom: tNom,
+
+        byUid: u?.uid || null,
         event: (eventName || "").toString().trim() || "—",
 
-        // champs communs utiles
         nom: payload?.nom ?? null,
         qty: payload?.qty ?? null,
         status: payload?.status ?? null,
         equipementId: payload?.equipementId ?? null,
 
-        // détails optionnels
         note: payload?.note ?? null,
         po: payload?.po ?? null,
-        endroit: payload?.endroit ?? null,
         followUpText: payload?.followUpText ?? null,
         from: payload?.from ?? null,
         extra: payload?.extra ?? null,
@@ -123,13 +188,13 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     }
   }
 
+  // -------------------------
+  // ✅ Snapshot:
+  // - Admin: collectionGroup("reparations")
+  // - Non-admin: trailers/{trailerId}/reparations
+  // -------------------------
   useEffect(() => {
     setRows([]);
-    setMoveOpen(false);
-    setMoveRow(null);
-    setPo("");
-    setEndroit("");
-    setNote("");
     setDragOver(false);
 
     setDropOpen(false);
@@ -144,15 +209,33 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     setSuiviViewOpen(false);
     setSuiviViewRow(null);
 
+    setTlOpen(false);
+    setTlRow(null);
+
+    if (isAdmin) {
+      const qAll = query(collectionGroup(db, "reparations"), orderBy("createdAt", "desc"));
+      return onSnapshot(
+        qAll,
+        (snap) => {
+          const mapped = snap.docs.map((d) => {
+            const tId = d.ref?.parent?.parent?.id || null;
+            return { id: d.id, ...d.data(), __trailerId: tId };
+          });
+          setRows(mapped);
+        },
+        (err) => console.error("reparations (admin global) snapshot:", err)
+      );
+    }
+
     if (!trailerId) return;
 
     const qR = query(collection(db, "trailers", trailerId, "reparations"), orderBy("createdAt", "desc"));
     return onSnapshot(
       qR,
-      (snap) => setRows(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (snap) => setRows(snap.docs.map((d) => ({ id: d.id, ...d.data(), __trailerId: trailerId }))),
       (err) => console.error("reparations snapshot:", err)
     );
-  }, [trailerId]);
+  }, [isAdmin, trailerId]);
 
   const equipOptions = useMemo(() => {
     return [...(equipements || [])].sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
@@ -188,32 +271,18 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     return null;
   }
 
-  function rowTrailerName(r) {
-    const tn = (r?.trailerNom || "").toString().trim();
-    if (tn) return tn;
-    const prop = (trailerNom || "").toString().trim();
-    return prop || "—";
-  }
-
   function rowDate(r) {
     const d = dateFromCreatedAt(r?.createdAt);
     return fmtDateFR(d);
   }
 
-  // =========================
-  // ✅ Nettoyage: enlève "caractéristique:" si la valeur l’a déjà
-  // =========================
   function stripCaracteristiquePrefix(s) {
     const v = (s ?? "").toString().trim();
     if (!v) return "";
-    // gère: "caracteristique:", "caractéristique:", "caractéristique -", "caractéristique ="
     return v.replace(/^\s*caract[ée]ristique\s*[:=\-]\s*/i, "").trim();
   }
 
-  // =========================
-  // ✅ Produit + Caractéristique (via label riche) — sans "Caractéristique:"
-  // =========================
-  function caracteristiqueForRow(r) {
+  function fieldsTextForRow(r) {
     const eq = findEquipById(r?.equipementId);
     if (!eq) return "";
 
@@ -223,16 +292,53 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
 
     const prefix = head + " — ";
     if (label.startsWith(prefix)) {
-      // Ici on retourne "Champ: valeur • Champ2: valeur2"
-      // Si un champ vaut "caractéristique: xxx", on nettoie quand même.
-      return stripCaracteristiquePrefix(label.slice(prefix.length).trim());
+      return label.slice(prefix.length).trim();
     }
     return "";
   }
 
-  // =========================
-  // ✅ Détails (Marque / Modèle / Série / Remarque)
-  // =========================
+  function toFRNumberString(x) {
+    const s = (x ?? "").toString().trim();
+    if (!s) return "";
+    if (/^\d+(\.\d+)?$/.test(s)) return s.replace(".", ",");
+    return s.replace(/(\d+)\.(\d+)/g, "$1,$2");
+  }
+
+  function cleanValueOnly(text) {
+    let t = (text ?? "").toString().trim();
+    if (!t) return "";
+
+    const idx = t.indexOf(":");
+    if (idx >= 0) t = t.slice(idx + 1).trim();
+
+    t = t.replace(/^\s*(courant|current)\s*[:=\-]\s*/i, "").trim();
+    t = toFRNumberString(t);
+
+    t = t.replace(/\s*(amps?|amp|a)\b/gi, " Amp");
+    t = t.replace(/\s+/g, " ").trim();
+    t = t.replace(/\bamp\b/gi, "Amp");
+    t = t.replace(/(\d)(Amp)\b/g, "$1 $2");
+
+    return t;
+  }
+
+  function inlineCaracteristiqueForRow(r) {
+    const raw = stripCaracteristiquePrefix(fieldsTextForRow(r));
+    if (!raw) return "";
+
+    const parts = raw
+      .split("•")
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    const pick =
+      parts.find((p) => /courant|amp|amperage|amp[eé]rage|current/i.test(p)) ||
+      parts[0] ||
+      "";
+
+    return cleanValueOnly(stripCaracteristiquePrefix(pick));
+  }
+
   function getDetail(details, keys) {
     const d = details || {};
     for (const k of keys) {
@@ -249,9 +355,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     const details = eq?.details || {};
 
     const produit = getDetail(details, ["produit", "product", "item"]);
-
-    // ✅ on va chercher une "caractéristique" en direct dans details si elle existe
-    // ✅ et on enlève le préfixe "caractéristique:" si présent
     const caracteristique = stripCaracteristiquePrefix(
       getDetail(details, ["caracteristique", "caractéristique", "spec", "specification", "feature", "courant", "amp", "amperage"])
     );
@@ -262,13 +365,8 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     const dimension = getDetail(details, ["dimension", "dimensions", "taille", "size"]);
 
     const parts = [];
-
-    // ✅ Produit (si tu veux l'enlever, supprime cette ligne)
     if (produit) parts.push(produit);
-
-    // ✅ caractéristique "brute" sans "Caractéristique:"
-    if (caracteristique) parts.push(caracteristique);
-
+    if (caracteristique) parts.push(cleanValueOnly(caracteristique));
     if (marque) parts.push(`Marque: ${marque}`);
     if (modele) parts.push(`Modèle: ${modele}`);
     if (serie) parts.push(`Série: ${serie}`);
@@ -276,69 +374,22 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
 
     const remarque = (eq?.remarque ?? eq?.note ?? details?.remarque ?? details?.note ?? "").toString().trim() || "";
 
-    return {
-      line: parts.join(" • "),
-      remarque,
-    };
-  }
-
-  function openMove(r) {
-    if (!isAdmin) return;
-    setMoveRow(r);
-    setPo((r?.po || "").toString());
-    setEndroit((r?.endroit || "").toString());
-    setNote((r?.note || "").toString());
-    setMoveOpen(true);
-  }
-
-  async function confirmMoveToRepair() {
-    if (!isAdmin) return;
-    if (!trailerId || !moveRow?.id) return;
-    const u = auth.currentUser;
-
-    const newPo = (po || "").toString().trim() || null;
-    const newEndroit = (endroit || "").toString().trim() || null;
-    const newNote = (note || "").toString().trim() || null;
-
-    try {
-      await updateDoc(doc(db, "trailers", trailerId, "reparations", moveRow.id), {
-        status: "reparation",
-        po: newPo,
-        endroit: newEndroit,
-        note: newNote,
-        movedAt: serverTimestamp(),
-        movedByUid: u?.uid || null,
-      });
-
-      await logHistory("MOVE_REPARATION", {
-        trackId: moveRow.id,
-        nom: moveRow?.nom || "—",
-        qty: Number(moveRow?.qty || 0),
-        status: "reparation",
-        equipementId: moveRow?.equipementId || null,
-        po: newPo,
-        endroit: newEndroit,
-        note: newNote,
-        from: moveRow?.from || null,
-      });
-
-      setMoveOpen(false);
-      setMoveRow(null);
-    } catch (e) {
-      console.error("confirmMoveToRepair:", e);
-      alert("Erreur: " + (e?.message || "inconnue"));
-    }
+    return { line: parts.join(" • "), remarque };
   }
 
   async function removeRow(r) {
-    if (!trailerId || !r?.id) return;
+    const tId = getRowTrailerId(r);
+    if (!tId || !r?.id) return;
+
     const ok = window.confirm("Supprimer cette ligne ?");
     if (!ok) return;
 
     try {
-      await deleteDoc(doc(db, "trailers", trailerId, "reparations", r.id));
+      await deleteDoc(doc(db, "trailers", tId, "reparations", r.id));
 
       await logHistory("SUPPRIME", {
+        trailerId: tId,
+        trailerNom: getRowTrailerNom(r),
         trackId: r.id,
         nom: r?.nom || "—",
         qty: Number(r?.qty || 0),
@@ -346,10 +397,11 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         equipementId: r?.equipementId || null,
         note: r?.note || null,
         po: r?.po || null,
-        endroit: r?.endroit || null,
         followUpText: r?.followUpText || null,
         from: r?.from || null,
       });
+
+      await notifDone(r.id, "deleted");
     } catch (e) {
       console.error("removeRow:", e);
       alert("Erreur: " + (e?.message || "inconnue"));
@@ -357,109 +409,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
   }
 
   // =========================
-  // ✅ Réparé = retour dans trailer + supprimer la ligne réparation
-  // =========================
-  async function markAsRepaired(r) {
-    if (!isAdmin) return;
-    if (!trailerId || !r?.id) return;
-
-    const qn = Number(r.qty || 0);
-    if (!Number.isFinite(qn) || qn <= 0) return alert("Quantité invalide sur la réparation.");
-
-    const catId = (r?.from?.catId || "").toString().trim();
-    const itemId = (r?.from?.itemId || "").toString().trim();
-    if (!catId || !itemId) return alert("Impossible de retourner dans le trailer: origine manquante (catId/itemId).");
-
-    const eq = findEquipById(r.equipementId);
-    const unite = (eq?.unite || "").toString().trim();
-
-    try {
-      await runTransaction(db, async (tx) => {
-        const repRef = doc(db, "trailers", trailerId, "reparations", r.id);
-        const repSnap = await tx.get(repRef);
-        if (!repSnap.exists()) throw new Error("Cette ligne n’existe plus.");
-
-        const rep = repSnap.data() || {};
-        if ((rep.status || "") !== "reparation") throw new Error("Cette ligne n’est pas en réparation.");
-
-        const addQty = Number(rep.qty || 0);
-        if (!Number.isFinite(addQty) || addQty <= 0) throw new Error("Quantité invalide sur la réparation.");
-
-        const itemRef = doc(db, "trailers", trailerId, "categories", catId, "items", itemId);
-        const itemSnap = await tx.get(itemRef);
-
-        if (itemSnap.exists()) {
-          const cur = Number(itemSnap.data()?.qty || 0);
-          const next = (Number.isFinite(cur) ? cur : 0) + addQty;
-          tx.update(itemRef, { qty: next });
-        } else {
-          tx.set(itemRef, {
-            equipementId: rep.equipementId || null,
-            nom: (rep.nom || "").toString(),
-            unite: unite || (rep.unite || "").toString() || "",
-            qty: addQty,
-            createdAt: serverTimestamp(),
-          });
-        }
-
-        const hRef = doc(collection(db, "reparations_history"));
-        tx.set(hRef, {
-          ts: serverTimestamp(),
-          trackId: r.id,
-          trailerId: trailerId || null,
-          trailerNom: (trailerNom || "").toString().trim() || (rep.trailerNom || "—"),
-          byUid: auth.currentUser?.uid || null,
-          event: "RETOUR_REPARE",
-          nom: (rep.nom || "—").toString(),
-          qty: addQty,
-          status: "retour_trailer",
-          equipementId: rep.equipementId || null,
-          from: rep.from || { catId, itemId },
-        });
-
-        tx.delete(repRef);
-      });
-    } catch (e) {
-      console.error("markAsRepaired:", e);
-      alert("Erreur: " + (e?.message || "inconnue"));
-    }
-  }
-
-  // =========================
-  // ✅ Non-réparable = déplacer vers "Brisé à jeté"
-  // =========================
-  async function markAsNotRepairable(r) {
-    if (!isAdmin) return;
-    if (!trailerId || !r?.id) return;
-
-    const ok = window.confirm("Marquer NON-réparable ? (Ça envoie dans “Brisé à jeté”)");
-    if (!ok) return;
-
-    try {
-      const u = auth.currentUser;
-      await updateDoc(doc(db, "trailers", trailerId, "reparations", r.id), {
-        status: "jete",
-        nonReparableAt: serverTimestamp(),
-        nonReparableByUid: u?.uid || null,
-      });
-
-      await logHistory("NON_REPARABLE", {
-        trackId: r.id,
-        nom: r?.nom || "—",
-        qty: Number(r?.qty || 0),
-        status: "jete",
-        equipementId: r?.equipementId || null,
-        from: r?.from || null,
-        extra: { fromStatus: "reparation" },
-      });
-    } catch (e) {
-      console.error("markAsNotRepairable:", e);
-      alert("Erreur: " + (e?.message || "inconnue"));
-    }
-  }
-
-  // =========================
-  // ✅ Suivi (Brisé à jeté)
+  // ✅ ADMIN SEULEMENT : Suivi (écrire)
   // =========================
   function openSuiviModal(r) {
     if (!isAdmin) return;
@@ -470,20 +420,25 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
 
   async function confirmSuivi() {
     if (!isAdmin) return;
-    if (!trailerId || !suiviRow?.id) return;
+    if (!suiviRow?.id) return;
+
+    const tId = getRowTrailerId(suiviRow);
+    if (!tId) return alert("Trailer manquant sur cette ligne.");
 
     const text = (suiviText || "").toString().trim();
     if (!text) return alert("Écris quoi faire (obligatoire).");
 
     try {
       const u = auth.currentUser;
-      await updateDoc(doc(db, "trailers", trailerId, "reparations", suiviRow.id), {
+      await updateDoc(doc(db, "trailers", tId, "reparations", suiviRow.id), {
         followUpText: text,
         followUpAt: serverTimestamp(),
         followUpByUid: u?.uid || null,
       });
 
       await logHistory("SUIVI", {
+        trailerId: tId,
+        trailerNom: getRowTrailerNom(suiviRow),
         trackId: suiviRow.id,
         nom: suiviRow?.nom || "—",
         qty: Number(suiviRow?.qty || 0),
@@ -492,6 +447,8 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         followUpText: text,
         from: suiviRow?.from || null,
       });
+
+      await notifDone(suiviRow.id, "suivi_written");
 
       setSuiviOpen(false);
       setSuiviRow(null);
@@ -574,13 +531,47 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           nom,
           qty: qn,
           trailerNom: safeTrailerNom,
-          po: null,
-          endroit: null,
-          note: null,
           createdAt: serverTimestamp(),
           createdByUid: u.uid,
           source: "dragdrop",
           from: { catId, itemId },
+
+          // --- timeline (nouveau)
+          adminActionType: null, // "styro" | "reparer"
+          adminActionNote: null,
+          adminActionPo: null,
+          adminActionAt: null,
+          adminActionByUid: null,
+
+          // chemin "reparer" (non-admin)
+          porterAt: null,
+          porterByUid: null,
+          porterByName: null,
+          porterWhere: null,
+
+          chercherAt: null,
+          chercherByUid: null,
+          chercherByName: null,
+
+          pretAt: null,
+          pretByUid: null,
+          pretByName: null,
+
+          // chemin "styro"
+          toStyroAt: null,
+          toStyroByUid: null,
+          toStyroByName: null,
+
+          styroRecuAt: null,
+          styroRecuByUid: null,
+          styroRecuNote: null,
+
+          styroMiseReparationAt: null,
+          styroMiseReparationByUid: null,
+
+          styroRenvoyeAt: null,
+          styroRenvoyeByUid: null,
+          styroRenvoyeNote: null,
         });
 
         const hRef = doc(collection(db, "reparations_history"));
@@ -601,6 +592,25 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
             trailerQtyAfter: remaining <= 0 ? 0 : remaining,
           },
         });
+
+        // ✅ NOTIF ADMIN (seulement si l'utilisateur actuel n'est PAS admin)
+        if (!isAdmin) {
+          const nRef = doc(db, "notifications", repRef.id); // même id que la réparation
+          tx.set(nRef, {
+            targetRole: "admin",
+            done: false,
+            createdAt: serverTimestamp(),
+            createdByUid: u.uid,
+            type: "reparation_added",
+            status, // "brise" | "jete"
+            trailerId: trailerId || null,
+            trailerNom: safeTrailerNom,
+            repId: repRef.id,
+            nom,
+            qty: qn,
+            source: "dragdrop_non_admin",
+          });
+        }
       });
 
       setDropOpen(false);
@@ -635,42 +645,107 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     const meta = equipMetaForRow(r);
     const line = (meta.line || "").trim();
     const rm = (meta.remarque || "").trim();
-
     if (!line && !rm) return null;
 
     return (
-      <div style={{ marginTop: 6, fontSize: 12, fontWeight: 850, color: "rgba(15,23,42,0.72)", lineHeight: 1.25 }}>
+      <div style={{ marginTop: 3, fontSize: 11, fontWeight: 750, color: "rgba(15,23,42,0.70)", lineHeight: 1.2 }}>
         {line ? <div>{line}</div> : null}
         {rm ? (
-          <div style={{ marginTop: line ? 4 : 0, color: "rgba(15,23,42,0.68)" }}>
-            Remarque: <b>{rm.length > 70 ? rm.slice(0, 70) + "…" : rm}</b>
+          <div style={{ marginTop: line ? 3 : 0, color: "rgba(15,23,42,0.66)" }}>
+            Remarque: <b>{rm.length > 60 ? rm.slice(0, 60) + "…" : rm}</b>
           </div>
         ) : null}
       </div>
     );
   }
 
-  // ✅ affiche la caractéristique (fields) SANS le label "Caractéristique:"
-  // et enlève aussi le préfixe si la valeur le contient déjà
-  function renderProduitCaracteristique(r) {
-    const raw = caracteristiqueForRow(r);
-    const car = stripCaracteristiquePrefix(raw);
-    if (!car) return null;
+  function TinyX({ onClick }) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title="Supprimer"
+        aria-label="Supprimer"
+        style={{
+          height: 22,
+          minWidth: 22,
+          padding: "0 6px",
+          borderRadius: 999,
+          border: "1px solid rgba(239,68,68,0.35)",
+          background: "rgba(239,68,68,0.10)",
+          color: "rgba(185,28,28,0.95)",
+          fontSize: 12,
+          fontWeight: 1000,
+          lineHeight: "20px",
+          cursor: "pointer",
+        }}
+      >
+        ✕
+      </button>
+    );
+  }
+
+  function ReparRow({ r, actions }) {
+    const car = inlineCaracteristiqueForRow(r);
+    const tName = getRowTrailerNom(r);
 
     return (
-      <div style={{ marginTop: 6, fontSize: 12.5, color: "rgba(15,23,42,0.78)", lineHeight: 1.25 }}>
-        <b>{car}</b>
+      <div className="pr-row" style={{ padding: "10px 12px", margin: "0 0 10px 0" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 1000, marginBottom: 4, opacity: 0.9 }}>{tName}</div>
+
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", lineHeight: 1.15 }}>
+              <div className="pr-rowName" style={{ margin: 0, fontSize: 15, fontWeight: 1000 }}>
+                {r.nom || "—"}
+              </div>
+              {car ? <div style={{ fontWeight: 1000, fontSize: 15, lineHeight: 1.15 }}>{car}</div> : null}
+            </div>
+
+            {renderExtraLine(r)}
+
+            <div
+              className="pr-rowMeta"
+              style={{
+                display: "flex",
+                gap: 12,
+                flexWrap: "wrap",
+                marginTop: 6,
+                fontSize: 12.5,
+                fontWeight: 850,
+                opacity: 0.98,
+                lineHeight: 1.15,
+              }}
+            >
+              <span>
+                <b>{rowDate(r)}</b>
+              </span>
+              <span>
+                Qté: <b>{Number(r.qty || 0)}</b>
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", paddingTop: 2 }}>
+            {actions}
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="pr-rail">
-      {/* Header + Dropzone seulement */}
+      {/* Header + Dropzone */}
       <div className="pr-card pr-headCard">
         <div className="pr-headTop">
           <div>
             <div className="pr-title">Bris / Réparation</div>
+            {isAdmin ? (
+              <div style={{ marginTop: 2, fontSize: 12, opacity: 0.75 }}>
+                Vue admin: <b>tous les trailers</b>
+              </div>
+            ) : null}
           </div>
         </div>
 
@@ -704,39 +779,18 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         ) : (
           <div className="pr-list">
             {broken.map((r) => (
-              <div key={r.id} className="pr-row">
-                <div className="pr-rowMain">
-                  <div className="pr-rowName">{r.nom || "—"}</div>
-
-                  {/* ✅ caractéristique sans "Caractéristique:" */}
-                  {renderProduitCaracteristique(r)}
-
-                  {renderExtraLine(r)}
-
-                  <div className="pr-rowMeta" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <span>
-                      Qté: <b>{Number(r.qty || 0)}</b>
-                    </span>
-                    <span>
-                      Date: <b>{rowDate(r)}</b>
-                    </span>
-                    <span>
-                      Trailer: <b>{rowTrailerName(r)}</b>
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pr-rowActions">
-                  {isAdmin ? (
-                    <button className="pr-btn pr-btnGhost" type="button" onClick={() => openMove(r)}>
-                      → Réparation
+              <ReparRow
+                key={`${r.__trailerId || "t"}_${r.id}`}
+                r={r}
+                actions={
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button className="pr-btn pr-btnGhost" type="button" onClick={() => openTimeline(r)}>
+                      🕘 Timeline
                     </button>
-                  ) : null}
-                  <button className="pr-btn pr-btnDanger" type="button" onClick={() => removeRow(r)}>
-                    ✕
-                  </button>
-                </div>
-              </div>
+                    <TinyX onClick={() => removeRow(r)} />
+                  </div>
+                }
+              />
             ))}
           </div>
         )}
@@ -761,65 +815,38 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
               const hasFollowUp = !!(r?.followUpText || "").toString().trim();
               return (
                 <div
-                  key={r.id}
-                  className="pr-row"
+                  key={`${r.__trailerId || "t"}_${r.id}`}
                   style={
                     hasFollowUp
                       ? {
-                          background: "rgba(245, 158, 11, 0.18)",
-                          border: "1px solid rgba(245, 158, 11, 0.35)",
+                          background: "rgba(245, 158, 11, 0.15)",
+                          border: "1px solid rgba(245, 158, 11, 0.30)",
+                          borderRadius: 14,
+                          padding: 0,
                         }
                       : undefined
                   }
                 >
-                  <div className="pr-rowMain">
-                    <div className="pr-rowName">{r.nom || "—"}</div>
+                  <ReparRow
+                    r={r}
+                    actions={
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {isAdmin && !hasFollowUp ? (
+                          <button className="pr-btn pr-btnGhost" type="button" onClick={() => openSuiviModal(r)}>
+                            📝 Suivi
+                          </button>
+                        ) : null}
 
-                    {/* ✅ caractéristique sans "Caractéristique:" */}
-                    {renderProduitCaracteristique(r)}
+                        {!isAdmin && hasFollowUp ? (
+                          <button className="pr-btn pr-btnGhost" type="button" onClick={() => openSuiviViewModal(r)}>
+                            ✅ Confirmer
+                          </button>
+                        ) : null}
 
-                    {renderExtraLine(r)}
-
-                    <div className="pr-rowMeta" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      <span>
-                        Qté: <b>{Number(r.qty || 0)}</b>
-                      </span>
-                      <span>
-                        Date: <b>{rowDate(r)}</b>
-                      </span>
-                      <span>
-                        Trailer: <b>{rowTrailerName(r)}</b>
-                      </span>
-                    </div>
-
-                    {hasFollowUp ? (
-                      <div style={{ marginTop: 6, opacity: 0.85, fontSize: 13 }}>
-                        Suivi:{" "}
-                        <b>
-                          {(r.followUpText || "").toString().slice(0, 60)}
-                          {(r.followUpText || "").toString().length > 60 ? "…" : ""}
-                        </b>
+                        <TinyX onClick={() => removeRow(r)} />
                       </div>
-                    ) : null}
-                  </div>
-
-                  <div className="pr-rowActions">
-                    {isAdmin ? (
-                      hasFollowUp ? (
-                        <button className="pr-btn pr-btnGhost" type="button" onClick={() => openSuiviViewModal(r)}>
-                          ✅ Confirmer
-                        </button>
-                      ) : (
-                        <button className="pr-btn pr-btnGhost" type="button" onClick={() => openSuiviModal(r)}>
-                          📝 Suivi
-                        </button>
-                      )
-                    ) : null}
-
-                    <button className="pr-btn pr-btnDanger" type="button" onClick={() => removeRow(r)}>
-                      ✕
-                    </button>
-                  </div>
+                    }
+                  />
                 </div>
               );
             })}
@@ -843,114 +870,22 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         ) : (
           <div className="pr-list">
             {inRepair.map((r) => (
-              <div key={r.id} className="pr-row">
-                <div className="pr-rowMain">
-                  <div className="pr-rowName">{r.nom || "—"}</div>
-
-                  {/* ✅ caractéristique sans "Caractéristique:" */}
-                  {renderProduitCaracteristique(r)}
-
-                  {renderExtraLine(r)}
-
-                  <div className="pr-rowMeta" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <span>
-                      Qté: <b>{Number(r.qty || 0)}</b>
-                    </span>
-                    <span>
-                      Date: <b>{rowDate(r)}</b>
-                    </span>
-                    <span>
-                      Trailer: <b>{rowTrailerName(r)}</b>
-                    </span>
+              <ReparRow
+                key={`${r.__trailerId || "t"}_${r.id}`}
+                r={r}
+                actions={
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <button className="pr-btn pr-btnGhost" type="button" onClick={() => openTimeline(r)}>
+                      🕘 Timeline
+                    </button>
+                    <TinyX onClick={() => removeRow(r)} />
                   </div>
-
-                  <div className="pr-repairMeta" style={{ marginTop: 6 }}>
-                    <span className="pr-miniPill">
-                      PO: <b>{r.po || "—"}</b>
-                    </span>
-                    <span className="pr-miniPill">
-                      Endroit: <b>{r.endroit || "—"}</b>
-                    </span>
-                  </div>
-
-                  {r.note ? <div className="pr-note">{r.note}</div> : null}
-                </div>
-
-                <div className="pr-rowActions">
-                  {isAdmin ? (
-                    <>
-                      <button className="pr-btn pr-btnGhost" type="button" onClick={() => markAsRepaired(r)}>
-                        ✅ Réparé
-                      </button>
-                      <button className="pr-btn pr-btnDanger" type="button" onClick={() => markAsNotRepairable(r)}>
-                        🗑 Non-réparable
-                      </button>
-                    </>
-                  ) : null}
-
-                  <button className="pr-btn pr-btnDanger" type="button" onClick={() => removeRow(r)}>
-                    ✕
-                  </button>
-                </div>
-              </div>
+                }
+              />
             ))}
           </div>
         )}
       </div>
-
-      {/* Modal admin -> passer en réparation */}
-      {moveOpen && moveRow && isAdmin && (
-        <div className="pt-modalOverlay" onMouseDown={() => setMoveOpen(false)}>
-          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="pt-modalHead">
-              <div className="pt-modalTitle">Passer en réparation</div>
-              <button className="pt-modalClose" type="button" onClick={() => setMoveOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="pt-modalBody">
-              <div style={{ fontWeight: 1000, marginBottom: 10 }}>{moveRow.nom || "—"}</div>
-
-              {/* ✅ caractéristique sans "Caractéristique:" */}
-              {renderProduitCaracteristique(moveRow)}
-
-              {renderExtraLine(moveRow)}
-
-              <div className="pr-modalGrid" style={{ marginTop: 10 }}>
-                <div>
-                  <div className="pt-modalLabel">Numéro PO</div>
-                  <input className="pt-input" value={po} onChange={(e) => setPo(e.target.value)} placeholder="ex: PO-12345" />
-                </div>
-
-                <div>
-                  <div className="pt-modalLabel">Endroit</div>
-                  <input
-                    className="pt-input"
-                    value={endroit}
-                    onChange={(e) => setEndroit(e.target.value)}
-                    placeholder="ex: Garage — Étagère A"
-                  />
-                </div>
-
-                <div className="pr-span2">
-                  <div className="pt-modalLabel">Note</div>
-                  <input className="pt-input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="ex: Bearing à changer" />
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-modalFoot">
-              <button className="pt-btn" type="button" onClick={confirmMoveToRepair}>
-                Confirmer
-              </button>
-              <button className="pt-btn pt-btnGhost" type="button" onClick={() => setMoveOpen(false)}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modal drop (quantité + destination) */}
       {dropOpen && dropPayload && (
@@ -1003,7 +938,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         </div>
       )}
 
-      {/* Modal Suivi (écrire quoi faire) */}
+      {/* Modal Suivi (ADMIN seulement) */}
       {suiviOpen && suiviRow && isAdmin && (
         <div className="pt-modalOverlay" onMouseDown={() => setSuiviOpen(false)}>
           <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
@@ -1016,11 +951,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
 
             <div className="pt-modalBody">
               <div style={{ fontWeight: 1000, marginBottom: 8 }}>{suiviRow.nom || "—"}</div>
-
-              {/* ✅ caractéristique sans "Caractéristique:" */}
-              {renderProduitCaracteristique(suiviRow)}
-
-              {renderExtraLine(suiviRow)}
+              <div style={{ marginTop: 8, fontSize: 14.5, fontWeight: 1000, opacity: 0.9 }}>{getRowTrailerNom(suiviRow)}</div>
 
               <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 10 }}>
                 <div className="pt-modalLabel">Quoi faire ?</div>
@@ -1031,7 +962,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
                   onChange={(e) => setSuiviText(e.target.value)}
                   placeholder="Ex: Apporter au bureau / envoyer photo / demander à Phil / etc."
                 />
-                <div className="pt-modalHint">Après confirmation, la case devient jaune et le bouton devient “Confirmer”.</div>
               </div>
             </div>
 
@@ -1047,7 +977,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         </div>
       )}
 
-      {/* Modal Confirmer (lecture seulement pour l’instant) */}
+      {/* Modal Confirmer (lecture) */}
       {suiviViewOpen && suiviViewRow && (
         <div className="pt-modalOverlay" onMouseDown={() => setSuiviViewOpen(false)}>
           <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
@@ -1060,18 +990,13 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
 
             <div className="pt-modalBody">
               <div style={{ fontWeight: 1000, marginBottom: 8 }}>{suiviViewRow.nom || "—"}</div>
-
-              {/* ✅ caractéristique sans "Caractéristique:" */}
-              {renderProduitCaracteristique(suiviViewRow)}
-
-              {renderExtraLine(suiviViewRow)}
+              <div style={{ marginTop: 8, fontSize: 14.5, fontWeight: 1000, opacity: 0.9 }}>{getRowTrailerNom(suiviViewRow)}</div>
 
               <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 10 }}>
                 <div className="pt-modalLabel">À faire</div>
                 <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
                   {(suiviViewRow.followUpText || "").toString().trim() || "—"}
                 </div>
-                <div className="pt-modalHint">Pour l’instant, ce bouton ne fait rien d’autre. On va le lier plus tard.</div>
               </div>
             </div>
 
@@ -1083,6 +1008,20 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           </div>
         </div>
       )}
+
+      {/* ✅ Timeline modal */}
+      <RepairTimelineModal
+        open={tlOpen}
+        onClose={closeTimeline}
+        row={tlRow}
+        isAdmin={isAdmin}
+        getRowTrailerId={getRowTrailerId}
+        getRowTrailerNom={getRowTrailerNom}
+        findEquipById={findEquipById}
+        logHistory={logHistory}
+        notifDone={notifDone}
+        notifOpenOrUpdate={notifOpenOrUpdate}
+      />
     </div>
   );
 }

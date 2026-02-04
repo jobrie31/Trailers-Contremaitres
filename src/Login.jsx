@@ -117,7 +117,7 @@ export default function Login() {
         await setDoc(
           doc(db, "trailers", uid),
           {
-            trailerNom: `Trailer — ${emp.nom || cleanEmail}`,
+            trailerNom: (emp.nom || cleanEmail).toString().trim(),
             ownerUid: uid,
             createdAt: serverTimestamp(),
           },

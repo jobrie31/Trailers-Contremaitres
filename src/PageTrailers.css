@@ -40,6 +40,27 @@
   justify-content: flex-end;
 }
 
+/* ✅ NOUVEAU: layout global (main + rail) */
+.pt-layout{
+  --rail-w: 420px;
+  display: grid;
+  grid-template-columns: 1fr var(--rail-w);
+  gap: 14px;
+  align-items: start;
+}
+
+.pt-main{
+  min-width: 0; /* important pour overflow/table */
+}
+
+.pt-railWrap{
+  width: var(--rail-w);
+  position: sticky;
+  top: 12px;
+  align-self: start;
+}
+
+/* Desktop large: garde ton look */
 .pt-grid{
   display:grid;
   grid-template-columns: 360px 1fr;
@@ -91,6 +112,9 @@
   box-sizing: border-box;
   background:#fff;
   font-weight: 800;
+
+  /* ✅ iOS: évite le zoom automatique */
+  font-size: 16px;
 }
 
 .pt-search{
@@ -106,6 +130,9 @@
   font-weight: 900;
   padding: 0 14px;
   cursor: pointer;
+
+  /* ✅ mobile */
+  touch-action: manipulation;
 }
 
 .pt-btn:disabled{
@@ -124,15 +151,18 @@
 }
 
 .pt-btnDanger{
-  height: 24px;
-  width: 34px;
-  border-radius: 10px;
+  height: 34px;
+  width: 44px;
+  border-radius: 12px;
   border: 1px solid rgba(239,68,68,0.35);
   background: rgba(239,68,68,0.12);
   cursor: pointer;
   font-weight: 1000;
   padding: 0;
   line-height: 1;
+
+  /* ✅ touch target */
+  touch-action: manipulation;
 }
 
 .pt-btnDangerWide{
@@ -143,6 +173,7 @@
   cursor: pointer;
   font-weight: 1000;
   padding: 0 14px;
+  touch-action: manipulation;
 }
 
 /* =========================
@@ -237,6 +268,9 @@
 .pt-tableWrap{
   overflow-x: auto;
   margin-top: 6px;
+
+  /* ✅ iOS scroll smooth */
+  -webkit-overflow-scrolling: touch;
 }
 
 .pt-table{
@@ -288,7 +322,7 @@
 }
 
 /* =========================
-   ✅ NOUVEAU: Nom produit + remarque (dans la même cellule)
+   ✅ Nom produit + remarque (dans la même cellule)
    ========================= */
 .pt-itemCell{
   display: grid;
@@ -325,7 +359,7 @@
 }
 
 /* =========================
-   FIX: Recherche à côté du titre de la catégorie
+   Recherche à côté du titre de la catégorie
    ========================= */
 .pt-sectionHead{
   align-items: center;
@@ -355,7 +389,6 @@
   white-space: nowrap;
 }
 
-/* override width:100% de .pt-input */
 .pt-catSearch{
   width: 220px !important;
   flex: 0 0 220px !important;
@@ -370,13 +403,16 @@
 }
 
 /* =========================
-   FIX: Scroll vertical max ~10 items
+   Scroll vertical max ~10 items
    ========================= */
 .pt-tableWrapScroll10{
   max-height: 420px !important;
   overflow-y: auto !important;
   overflow-x: auto !important;
   scrollbar-gutter: stable;
+
+  /* ✅ iOS */
+  -webkit-overflow-scrolling: touch;
 }
 
 /* =========================
@@ -399,32 +435,14 @@
   flex: 0 0 420px;
 }
 
-@media (max-width: 900px){
-  .pt-detailHead{
-    flex-wrap: wrap;
-    align-items: flex-start;
-  }
-  .pt-searchInline{
-    flex: 1 1 320px;
-    max-width: 100%;
-  }
-}
-
 /* =========================
-   Bouton échange fixé
+   Bouton échange fixé (desktop)
    ========================= */
 .pt-btnSwapFixed{
   position: fixed;
   left: 18px;
   top: 92px;
   z-index: 80;
-}
-
-@media (max-width: 900px){
-  .pt-btnSwapFixed{
-    left: 12px;
-    top: 86px;
-  }
 }
 
 /* =========================
@@ -468,13 +486,14 @@
 }
 
 .pt-modalClose{
-  height: 34px;
-  width: 34px;
-  border-radius: 12px;
+  height: 44px;
+  width: 44px;
+  border-radius: 14px;
   border: 1px solid rgba(15,23,42,0.12);
   background:#fff;
   cursor:pointer;
   font-weight: 1000;
+  touch-action: manipulation;
 }
 
 .pt-modalBody{
@@ -575,8 +594,8 @@
   display: grid;
   gap: 12px;
 
-  /* ✅ FIX: pousse le panneau plus à droite (vers le bord de la page) */
-  transform: translateX(200px);
+  /* ✅ IMPORTANT: on enlève le hack translateX, le layout s'en occupe */
+  transform: none;
 }
 
 /* Card de base */
@@ -800,14 +819,15 @@
 
 /* Boutons rail */
 .pr-btn{
-  height: 34px;
-  border-radius: 12px;
+  height: 44px;
+  border-radius: 14px;
   border: none;
   cursor: pointer;
   font-weight: 950;
-  padding: 0 10px;
+  padding: 0 12px;
   background: #111827;
   color: #fff;
+  touch-action: manipulation;
 }
 
 .pr-btnGhost{
@@ -820,7 +840,7 @@
   background: rgba(239,68,68,0.10);
   color: rgba(127,29,29,0.95);
   border: 1px solid rgba(239,68,68,0.35);
-  width: 40px;
+  width: 44px;
   padding: 0;
 }
 
@@ -863,10 +883,59 @@
   grid-column: span 2;
 }
 
-/* Responsive rail */
+/* =========================
+   ✅ RESPONSIVE (iPad / iPhone)
+   ========================= */
+
+/* iPad / petits écrans: rail moins large */
+@media (max-width: 1100px){
+  .pt-layout{
+    --rail-w: 360px;
+  }
+}
+
+/* ✅ Mobile & iPad portrait: rail en haut, grid en 1 colonne */
 @media (max-width: 900px){
-  .pr-rail{
-    transform: translateX(0); /* ✅ pas de décalage sur mobile */
+  .pt-layout{
+    display:flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pt-railWrap{
+    position: static;     /* pas sticky sur mobile */
+    width: 100%;
+    order: -1;            /* rail en haut */
+  }
+
+  .pt-grid{
+    grid-template-columns: 1fr;
+  }
+
+  .pt-detailHead{
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .pt-searchInline{
+    flex: 1 1 320px;
+    max-width: 100%;
+  }
+
+  /* Le scroll vertical de tableau: plus adapté au téléphone */
+  .pt-tableWrapScroll10{
+    max-height: 50vh !important;
+  }
+
+  /* Bouton échange: ne couvre pas l'écran */
+  .pt-btnSwapFixed{
+    position: static;
+    left: auto;
+    top: auto;
+  }
+
+  .pt-modalGrid{
+    grid-template-columns: 1fr;
   }
 
   .pr-form{
@@ -880,5 +949,11 @@
   }
   .pr-span2{
     grid-column: span 1;
+  }
+
+  /* Recherche catégorie devient plus flexible */
+  .pt-catSearch{
+    width: 160px !important;
+    flex: 0 0 160px !important;
   }
 }

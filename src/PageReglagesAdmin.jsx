@@ -235,51 +235,52 @@ export default function PageReglagesAdmin() {
     }
   }
 
-  // ✅ SUPPRIMER EMPLOYÉ (MAINTENANT: permis même si activé)
+  // ✅ SUPPRIMER EMPLOYÉ (NORMAL: Firestore seulement)
   async function supprimerEmploye(emp) {
     if (!emp?.id) return;
 
     const labelTxt = `${emp.nom || "—"} (${emp.email || "—"})`;
     const active = !!emp.uid;
 
-    // sécurité: empêcher l'admin de se supprimer lui-même
     const myUid = auth.currentUser?.uid || null;
-    if (active && myUid && emp.uid === myUid) {
+    const isMe = !!myUid && !!emp.uid && emp.uid === myUid;
+    if (isMe) {
       alert("Impossible de supprimer ton propre compte admin.");
       return;
     }
 
     const warn = active
-      ? `⚠️ ATTENTION: ce compte est DÉJÀ ACTIVÉ.\n\n` +
-        `Ça va supprimer le document employé + le user/trailer associés dans Firestore.\n` +
-        `⚠️ Ça NE supprime PAS l'utilisateur dans Firebase Auth (il existe encore techniquement).\n\n`
+      ? `⚠️ NOTE: ce compte est ACTIVÉ.\n\n` +
+        `On va supprimer les docs Firestore (employes/users/trailers).\n` +
+        `⚠️ L'utilisateur va encore exister dans Firebase Auth (email/mot de passe).\n\n`
       : "";
 
     const ok = window.confirm(`Supprimer cet employé?\n\n${warn}${labelTxt}\n\nCette action est définitive.`);
     if (!ok) return;
 
+    setBusy(true);
+    setMsg("");
+
     try {
-      // 1) supprimer employes/{id}
+      // 1) employes/{id}
       await deleteDoc(doc(db, "employes", emp.id));
 
-      // 2) best-effort: supprimer users/{uid} + trailers/{uid} si uid présent
+      // 2) users/{uid} + trailers/{uid} si activé
       if (emp.uid) {
         try {
           await deleteDoc(doc(db, "users", emp.uid));
-        } catch (e1) {
-          console.warn("delete users failed:", e1);
-        }
+        } catch {}
         try {
           await deleteDoc(doc(db, "trailers", emp.uid));
-        } catch (e2) {
-          console.warn("delete trailer failed:", e2);
-        }
+        } catch {}
       }
 
-      alert("Employé supprimé.");
+      alert("Employé supprimé (Firestore).");
     } catch (e) {
       console.error("supprimerEmploye:", e);
       alert("Erreur: " + (e?.message || "inconnue"));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -363,7 +364,9 @@ export default function PageReglagesAdmin() {
 
                 return (
                   <tr key={e.id}>
-                    <td style={td}><b>{e.nom || "—"}</b></td>
+                    <td style={td}>
+                      <b>{e.nom || "—"}</b>
+                    </td>
                     <td style={td}>{e.email || "—"}</td>
 
                     <td style={td}>
@@ -372,7 +375,7 @@ export default function PageReglagesAdmin() {
                         checked={!!e.isAdmin}
                         onChange={(ev) => toggleAdmin(e.id, ev.target.checked)}
                         title="Admin"
-                        disabled={isMe} // évite de te retirer tes droits par accident
+                        disabled={isMe}
                       />
                     </td>
 
@@ -403,7 +406,7 @@ export default function PageReglagesAdmin() {
                           type="button"
                           style={{ ...btnDanger, height: 34, opacity: isMe ? 0.45 : 1 }}
                           onClick={() => supprimerEmploye(e)}
-                          disabled={isMe}
+                          disabled={isMe || busy}
                           title={isMe ? "Impossible: ton propre compte" : "Supprimer"}
                         >
                           Supprimer
@@ -416,7 +419,9 @@ export default function PageReglagesAdmin() {
 
               {employesSorted.length === 0 && (
                 <tr>
-                  <td style={td} colSpan={5}>Aucun employé.</td>
+                  <td style={td} colSpan={5}>
+                    Aucun employé.
+                  </td>
                 </tr>
               )}
             </tbody>
