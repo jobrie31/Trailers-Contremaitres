@@ -9,13 +9,7 @@ import PageEquipements from "./PageEquipements";
 import PageReglagesAdmin from "./PageReglagesAdmin";
 import PageHistorique from "./PageHistorique"; // ✅ NEW
 
-import {
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 
 import "./AppShell.css";
 
@@ -23,9 +17,12 @@ export default function App() {
   const [user, setUser] = useState(undefined);
   const [route, setRoute] = useState("trailers"); // "trailers" | "equipements" | "historique" | "reglages"
 
-  // ✅ admin + alert
+  // ✅ admin + alert admin
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminAlertCount, setAdminAlertCount] = useState(0);
+
+  // ✅ alert "à répondre" (travailleur) — envoyé par PanelReparations via window.dispatchEvent(...)
+  const [turnAlertCount, setTurnAlertCount] = useState(0);
 
   // Auth
   useEffect(() => {
@@ -53,18 +50,14 @@ export default function App() {
     );
   }, [user?.uid]);
 
-  // ✅ Listener notifs admin non traitées -> fait clignoter le menu
+  // ✅ Listener notifs admin non traitées -> fait clignoter le menu (admin)
   useEffect(() => {
     setAdminAlertCount(0);
 
     if (!user?.uid) return;
     if (!isAdmin) return;
 
-    const qN = query(
-      collection(db, "notifications"),
-      where("targetRole", "==", "admin"),
-      where("done", "==", false)
-    );
+    const qN = query(collection(db, "notifications"), where("targetRole", "==", "admin"), where("done", "==", false));
 
     return onSnapshot(
       qN,
@@ -78,10 +71,24 @@ export default function App() {
     );
   }, [user?.uid, isAdmin]);
 
+  // ✅ Listener "à répondre" (travailleur) -> fait clignoter la bande du menu (topbar)
+  // PanelReparations doit dispatcher: window.dispatchEvent(new CustomEvent("app_turn_alert", { detail: { count } }))
+  useEffect(() => {
+    function onTurnAlert(e) {
+      const c = Number(e?.detail?.count || 0);
+      setTurnAlertCount(Number.isFinite(c) ? c : 0);
+    }
+    window.addEventListener("app_turn_alert", onTurnAlert);
+    return () => window.removeEventListener("app_turn_alert", onTurnAlert);
+  }, []);
+
   if (user === undefined) return <div style={{ padding: 20 }}>Chargement…</div>;
   if (!user) return <Login />;
 
-  const topbarIsAlert = isAdmin && adminAlertCount > 0;
+  // ✅ Bande blanche du menu flash si:
+  // - admin a des notifications à traiter
+  // - OU travailleur a des actions "à répondre"
+  const topbarIsAlert = (isAdmin && adminAlertCount > 0) || turnAlertCount > 0;
 
   return (
     <div className="appShell">
@@ -89,9 +96,25 @@ export default function App() {
         <div className="topbarInner">
           <div className="brand">
             Trailers Contremaîtres
-            {topbarIsAlert ? (
+
+            {/* ✅ Badge admin (comme avant) */}
+            {isAdmin && adminAlertCount > 0 ? (
               <span className="topbarAlertPill" title="Notifications à traiter">
                 {adminAlertCount}
+              </span>
+            ) : null}
+
+            {/* ✅ Badge travailleur (nouveau) */}
+            {!isAdmin && turnAlertCount > 0 ? (
+              <span className="topbarAlertPill" title="Actions à répondre">
+                À répondre: {turnAlertCount}
+              </span>
+            ) : null}
+
+            {/* ✅ Si admin ET aussi des actions à répondre (rare), on peut l’afficher aussi */}
+            {isAdmin && turnAlertCount > 0 ? (
+              <span className="topbarAlertPill" title="Actions à répondre (travailleur)">
+                À répondre: {turnAlertCount}
               </span>
             ) : null}
           </div>

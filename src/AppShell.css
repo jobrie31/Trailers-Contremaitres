@@ -154,6 +154,109 @@
 }
 
 
+/* ==========================================
+   ✅ TITRE DE PAGE (Trailers — Contremaîtres)
+   Ajoute className="pageTitleAlert" sur ton titre
+   ex: <h1 className={`pageTitle ${hasAlert ? "pageTitleAlert" : ""}`}>...</h1>
+   ========================================== */
+
+.pageTitle{
+  font-size: 20px;
+  font-weight: 1000;
+  letter-spacing: -0.2px;
+  margin: 0;
+}
+
+.pageTitleAlert{
+  color: rgba(127, 29, 29, 0.98);
+  animation: pageTitlePulseRed 1.0s infinite;
+  text-shadow: 0 0 0 rgba(220,38,38,0.00);
+}
+
+@keyframes pageTitlePulseRed{
+  0%   { opacity: 0.65; text-shadow: 0 0 0 rgba(220,38,38,0.00); }
+  50%  { opacity: 1.00; text-shadow: 0 0 16px rgba(220,38,38,0.28); }
+  100% { opacity: 0.65; text-shadow: 0 0 0 rgba(220,38,38,0.00); }
+}
+
+/* Variante optionnelle plus “badge” pour le titre Trailers */
+.trailersTitleAlert{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.10);
+  animation: trailersTitlePulseBg 1.0s infinite;
+}
+
+@keyframes trailersTitlePulseBg{
+  0%   { background: rgba(239,68,68,0.08); }
+  50%  { background: rgba(239,68,68,0.22); }
+  100% { background: rgba(239,68,68,0.08); }
+}
+
+
+/* ==========================================
+   ✅ ALERTS "À RÉPONDRE" (clignote rouge)
+   - utilisé dans PanelReparations
+   ========================================== */
+
+/* Petit point rouge qui clignote */
+.replyBlinkDot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(220, 38, 38, 0.95);
+  box-shadow: 0 0 0 0 rgba(220,38,38,0.35);
+  animation: replyBlinkDotPulse 1.0s infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes replyBlinkDotPulse{
+  0%   { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(220,38,38,0.30); opacity: 0.65; }
+  50%  { transform: scale(1.12); box-shadow: 0 0 0 7px rgba(220,38,38,0.00); opacity: 1; }
+  100% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(220,38,38,0.00); opacity: 0.65; }
+}
+
+/* Petit badge "À répondre" */
+.replyBlinkPill{
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 1000;
+  color: rgba(127, 29, 29, 0.98);
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  animation: replyBlinkPillPulse 1.0s infinite;
+  white-space: nowrap;
+}
+
+@keyframes replyBlinkPillPulse{
+  0%   { background: rgba(239,68,68,0.10); }
+  50%  { background: rgba(239,68,68,0.28); }
+  100% { background: rgba(239,68,68,0.10); }
+}
+
+/* Contour/ombre rouge sur une ligne à répondre */
+.pr-row.pr-rowAlert{
+  border: 2px solid rgba(220, 38, 38, 0.45);
+  border-radius: 16px;
+  background: rgba(239, 68, 68, 0.06);
+  animation: prRowAlertPulse 1.0s infinite;
+}
+
+@keyframes prRowAlertPulse{
+  0%   { box-shadow: 0 0 0 0 rgba(220,38,38,0.00); }
+  50%  { box-shadow: 0 0 0 7px rgba(220,38,38,0.10); }
+  100% { box-shadow: 0 0 0 0 rgba(220,38,38,0.00); }
+}
+
+
 /* =========================
    ✅ Responsive iPad/iPhone
    ========================= */

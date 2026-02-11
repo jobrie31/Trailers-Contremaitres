@@ -1,5 +1,6 @@
 // src/RepairTimelineModal.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { auth, db } from "./firebaseConfig";
 import { doc, updateDoc, serverTimestamp, runTransaction, collection } from "firebase/firestore";
 
@@ -34,9 +35,19 @@ export default function RepairTimelineModal({
   notifDone,
   notifOpenOrUpdate,
 }) {
-  // ⚠️ IMPORTANT: on ne fait PAS de return conditionnel avant les hooks
+  // ⚠️ IMPORTANT: pas de return conditionnel avant les hooks
   const visible = !!open && !!row;
   const r = row || {};
+
+  // ✅ lock scroll quand modal ouvert (iOS + UX)
+  useEffect(() => {
+    if (!visible) return;
+    const prev = document?.body?.style?.overflow;
+    if (document?.body) document.body.style.overflow = "hidden";
+    return () => {
+      if (document?.body) document.body.style.overflow = prev || "";
+    };
+  }, [visible]);
 
   const tId = useMemo(() => {
     if (!row) return null;
@@ -50,6 +61,14 @@ export default function RepairTimelineModal({
 
   const status = useMemo(() => ((r?.status || "") + "").trim(), [r?.status]);
 
+  // ✅ Nom du tableau (affiché dans le titre du popup)
+  const tableauNom = useMemo(() => {
+    if (status === "brise") return "Brisé";
+    if (status === "jete") return "Brisé à jeté";
+    if (status === "reparation") return "En réparation";
+    return "Réparations";
+  }, [status]);
+
   // ---------- Date helpers ----------
   function dateFromTs(ts) {
     if (!ts) return null;
@@ -61,6 +80,18 @@ export default function RepairTimelineModal({
       return null;
     } catch {
       return null;
+    }
+  }
+  function fmtDateFR(ts) {
+    const d = dateFromTs(ts);
+    if (!d) return "—";
+    try {
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = String(d.getFullYear());
+      return `${dd}/${mm}/${yyyy}`;
+    } catch {
+      return "—";
     }
   }
   function fmtDateTimeFR(ts) {
@@ -126,76 +157,148 @@ export default function RepairTimelineModal({
   const stepChercheDone = !!r?.chercherAt;
   const stepPretDone = !!r?.pretAt;
 
-  // ---------- steps for UI (ALWAYS called, no conditional return before) ----------
+  // ---------- steps ----------
+  // ✅ AVANT décision admin:
+  //   Point 1 = date (createdAt si dispo, sinon "Créé")
+  //   Point 2 = "En attente admin"
   const steps = useMemo(() => {
     if (!stepAdminDecisionDone) {
-      return [{ key: "decide", label: "1) Décision admin (Styro / Réparer)", done: false, date: "—" }];
+      return [
+        { key: "created", labelShort: fmtDateFR(r?.createdAt) === "—" ? "Créé" : fmtDateFR(r?.createdAt), done: true },
+        { key: "wait_admin", labelShort: "En attente admin", done: false },
+      ];
     }
 
     const path = (actionType || adminChoice || "").trim();
 
     if (path === "styro") {
       return [
-        { key: "decide", label: "1) Admin: Envoyer à Styro (note)", done: true, date: fmtDateTimeFR(r?.adminActionAt) },
-        {
-          key: "tostyro",
-          label: "2) Pas-admin: Envoyé à Styro (fait par)",
-          done: stepToStyroDone,
-          date: stepToStyroDone ? fmtDateTimeFR(r?.toStyroAt) : "—",
-          extra: stepToStyroDone ? (r?.toStyroByName || "—") : null,
-        },
-        {
-          key: "recu",
-          label: "3) Admin: Reçu",
-          done: stepStyroRecuDone,
-          date: stepStyroRecuDone ? fmtDateTimeFR(r?.styroRecuAt) : "—",
-        },
-        {
-          key: "mise",
-          label: "4) Admin: Mis en réparation",
-          done: stepStyroMiseReparationDone,
-          date: stepStyroMiseReparationDone ? fmtDateTimeFR(r?.styroMiseReparationAt) : "—",
-        },
-        {
-          key: "renvoye",
-          label: "5) Admin: Renvoyé",
-          done: stepStyroRenvoyeDone,
-          date: stepStyroRenvoyeDone ? fmtDateTimeFR(r?.styroRenvoyeAt) : "—",
-        },
-        { key: "retour", label: "6) Pas-admin: Reçu et remis dans le trailer", done: false, date: "—" },
+        { key: "decide", labelShort: "Décision", done: true },
+        { key: "tostyro", labelShort: "Envoyé", done: stepToStyroDone },
+        { key: "recu", labelShort: "Reçu", done: stepStyroRecuDone },
+        { key: "mise", labelShort: "En réparation", done: stepStyroMiseReparationDone },
+        { key: "renvoye", labelShort: "Renvoyé", done: stepStyroRenvoyeDone },
+        { key: "retour", labelShort: "Remis trailer", done: false },
       ];
     }
 
-    // reparer
     return [
-      { key: "decide", label: "1) Admin: Aller faire réparer (PO + note)", done: true, date: fmtDateTimeFR(r?.adminActionAt) },
-      {
-        key: "porte",
-        label: "2) Pas-admin: Je l’ai porté à…",
-        done: stepPorteDone,
-        date: stepPorteDone ? fmtDateTimeFR(r?.porterAt) : "—",
-        extra: stepPorteDone ? (r?.porterByName || "—") : null,
-      },
-      {
-        key: "cherche",
-        label: "3) Pas-admin: Je l’ai été le chercher",
-        done: stepChercheDone,
-        date: stepChercheDone ? fmtDateTimeFR(r?.chercherAt) : "—",
-        extra: stepChercheDone ? (r?.chercherByName || "—") : null,
-      },
-      {
-        key: "pret",
-        label: "4) Pas-admin: Prêt à l’emploi",
-        done: stepPretDone,
-        date: stepPretDone ? fmtDateTimeFR(r?.pretAt) : "—",
-        extra: stepPretDone ? (r?.pretByName || "—") : null,
-      },
-      { key: "retour", label: "5) Remis dans le trailer", done: false, date: "—" },
+      { key: "decide", labelShort: "Décision", done: true },
+      { key: "porte", labelShort: "Porté", done: stepPorteDone },
+      { key: "cherche", labelShort: "Cherché", done: stepChercheDone },
+      { key: "pret", labelShort: "Prêt", done: stepPretDone },
+      { key: "retour", labelShort: "Remis trailer", done: false },
     ];
   }, [
     stepAdminDecisionDone,
     actionType,
     adminChoice,
+    stepToStyroDone,
+    stepStyroRecuDone,
+    stepStyroMiseReparationDone,
+    stepStyroRenvoyeDone,
+    stepPorteDone,
+    stepChercheDone,
+    stepPretDone,
+    r?.createdAt,
+  ]);
+
+  const activeIndex = useMemo(() => {
+    const idx = steps.findIndex((s) => !s.done);
+    return idx === -1 ? steps.length - 1 : idx;
+  }, [steps]);
+
+  const stepInfo = useMemo(() => {
+    const path = (stepAdminDecisionDone ? actionType : "") || "";
+    const infos = {};
+
+    // ✅ infos avant décision admin
+    if (!stepAdminDecisionDone) {
+      infos.created = {
+        when: fmtDateTimeFR(r?.createdAt),
+        lines: ["Youston on a un problème"],
+      };
+      return infos;
+    }
+
+    infos.decide = {
+      when: fmtDateTimeFR(r?.adminActionAt),
+      lines: [
+        `Choix: ${
+          ((r?.adminActionType || "") + "").trim() === "styro"
+            ? "Envoyer à Styro"
+            : ((r?.adminActionType || "") + "").trim() === "reparer"
+            ? "Aller le faire réparer"
+            : "—"
+        }`,
+        (r?.adminActionPo || "").toString().trim()
+          ? `PO: ${(r?.adminActionPo || "").toString().trim()}`
+          : null,
+        `Note: ${(r?.adminActionNote || "").toString().trim() || "—"}`,
+      ].filter(Boolean),
+    };
+
+    if (path === "styro") {
+      if (stepToStyroDone) {
+        infos.tostyro = {
+          when: fmtDateTimeFR(r?.toStyroAt),
+          lines: [`Fait par: ${(r?.toStyroByName || "").toString().trim() || "—"}`],
+        };
+      }
+      if (stepStyroRecuDone) {
+        infos.recu = {
+          when: fmtDateTimeFR(r?.styroRecuAt),
+          lines: [
+            (r?.styroRecuNote || "").toString().trim()
+              ? `Note: ${(r?.styroRecuNote || "").toString().trim()}`
+              : null,
+          ].filter(Boolean),
+        };
+      }
+      if (stepStyroMiseReparationDone) {
+        infos.mise = {
+          when: fmtDateTimeFR(r?.styroMiseReparationAt),
+          lines: ["Statut: En réparation"],
+        };
+      }
+      if (stepStyroRenvoyeDone) {
+        infos.renvoye = {
+          when: fmtDateTimeFR(r?.styroRenvoyeAt),
+          lines: [
+            (r?.styroRenvoyeNote || "").toString().trim()
+              ? `Note: ${(r?.styroRenvoyeNote || "").toString().trim()}`
+              : null,
+          ].filter(Boolean),
+        };
+      }
+    } else if (path === "reparer") {
+      if (stepPorteDone) {
+        infos.porte = {
+          when: fmtDateTimeFR(r?.porterAt),
+          lines: [
+            `Porté à: ${(r?.porterWhere || "").toString().trim() || "—"}`,
+            `Fait par: ${(r?.porterByName || "").toString().trim() || "—"}`,
+          ],
+        };
+      }
+      if (stepChercheDone) {
+        infos.cherche = {
+          when: fmtDateTimeFR(r?.chercherAt),
+          lines: [`Fait par: ${(r?.chercherByName || "").toString().trim() || "—"}`],
+        };
+      }
+      if (stepPretDone) {
+        infos.pret = {
+          when: fmtDateTimeFR(r?.pretAt),
+          lines: [`Fait par: ${(r?.pretByName || "").toString().trim() || "—"}`],
+        };
+      }
+    }
+
+    return infos;
+  }, [
+    stepAdminDecisionDone,
+    actionType,
     r,
     stepToStyroDone,
     stepStyroRecuDone,
@@ -206,47 +309,105 @@ export default function RepairTimelineModal({
     stepPretDone,
   ]);
 
-  function Stepper() {
+  function TimelineHorizontal() {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 10 }}>
-        {steps.map((s, idx) => (
-          <div key={s.key} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-            <div
-              style={{
-                width: 18,
-                height: 18,
-                borderRadius: 999,
-                border: "2px solid rgba(15,23,42,0.35)",
-                background: s.done ? "rgba(34,197,94,0.25)" : "rgba(148,163,184,0.18)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: 1000,
-                fontSize: 12,
-                marginTop: 1,
-              }}
-            >
-              {s.done ? "✓" : idx + 1}
-            </div>
+      <div style={{ marginTop: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {steps.map((s, idx) => {
+            const isActive = idx === activeIndex;
+            const done = !!s.done;
 
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 1000, fontSize: 13.5, opacity: s.done ? 0.95 : 0.8 }}>{s.label}</div>
-              <div style={{ marginTop: 2, fontSize: 12, fontWeight: 850, opacity: 0.75 }}>
-                Date: {s.date}
-                {s.extra ? (
-                  <span style={{ marginLeft: 10 }}>
-                    — Fait par: <b>{s.extra}</b>
-                  </span>
+            return (
+              <React.Fragment key={s.key}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, minWidth: 54 }}>
+                  <div
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 999,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: 1000,
+                      fontSize: 13,
+                      border: done ? "2px solid rgba(34,197,94,0.65)" : "2px solid rgba(15,23,42,0.22)",
+                      background: done
+                        ? "rgba(34,197,94,0.18)"
+                        : isActive
+                        ? "rgba(59,130,246,0.12)"
+                        : "rgba(148,163,184,0.12)",
+                      color: done ? "rgba(22,101,52,0.95)" : "rgba(15,23,42,0.90)",
+                    }}
+                    title={s.labelShort}
+                  >
+                    {done ? "✓" : idx + 1}
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      fontWeight: 900,
+                      opacity: done ? 0.9 : isActive ? 0.85 : 0.6,
+                      textAlign: "center",
+                      lineHeight: 1.05,
+                      maxWidth: 90,
+                    }}
+                  >
+                    {s.labelShort}
+                  </div>
+                </div>
+
+                {idx < steps.length - 1 ? (
+                  <div
+                    style={{
+                      flex: 1,
+                      height: 3,
+                      borderRadius: 999,
+                      background: steps[idx].done ? "rgba(34,197,94,0.45)" : "rgba(148,163,184,0.25)",
+                      minWidth: 10,
+                    }}
+                  />
                 ) : null}
-              </div>
-            </div>
-          </div>
-        ))}
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+          {steps
+            .filter((s) => s.done && stepInfo?.[s.key])
+            .map((s) => {
+              const info = stepInfo[s.key];
+              return (
+                <div
+                  key={`info_${s.key}`}
+                  style={{
+                    border: "1px solid rgba(15,23,42,0.10)",
+                    background: "rgba(255,255,255,0.85)",
+                    borderRadius: 14,
+                    padding: "10px 12px",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline" }}>
+                    <div style={{ fontWeight: 1000, fontSize: 13.5, opacity: 0.92 }}>
+                      Étape {steps.findIndex((x) => x.key === s.key) + 1} — {s.labelShort}
+                    </div>
+                    <div style={{ fontSize: 12, fontWeight: 850, opacity: 0.7 }}>{info.when}</div>
+                  </div>
+
+                  <div style={{ marginTop: 6, fontSize: 12.8, fontWeight: 850, opacity: 0.85, lineHeight: 1.25 }}>
+                    {info.lines.map((ln, i) => (
+                      <div key={i}>{ln}</div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+        </div>
       </div>
     );
   }
 
-  // ---------- helpers ----------
   function mustHaveOrigin() {
     const catId = (r?.from?.catId || "").toString().trim();
     const itemId = (r?.from?.itemId || "").toString().trim();
@@ -351,7 +512,6 @@ export default function RepairTimelineModal({
     }
   }
 
-  // --- PATH STYRO ---
   async function userConfirmSentToStyro() {
     if (isAdmin) return;
     if (!tId || !r?.id) return;
@@ -511,7 +671,6 @@ export default function RepairTimelineModal({
     }
   }
 
-  // --- PATH REPARER ---
   async function userConfirmPorteA() {
     if (isAdmin) return;
     if (!tId || !r?.id) return;
@@ -656,14 +815,17 @@ export default function RepairTimelineModal({
       ? "Envoyer à Styro"
       : "—";
 
-  // ✅ Maintenant seulement: on peut retourner null ICI (après tous les hooks)
+  // ✅ return null seulement après hooks
   if (!visible) return null;
+  if (typeof document === "undefined") return null;
 
-  return (
+  const modal = (
     <div className="pt-modalOverlay" onMouseDown={onClose}>
-      <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+      {/* ✅ plus gros: enlever pt-modalSmall */}
+      <div className="pt-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="pt-modalHead">
-          <div className="pt-modalTitle">Ligne du temps — Réparation</div>
+          {/* ✅ titre = tableau */}
+          <div className="pt-modalTitle">Tableau — {tableauNom}</div>
           <button className="pt-modalClose" type="button" onClick={onClose}>
             ✕
           </button>
@@ -673,12 +835,12 @@ export default function RepairTimelineModal({
           <div style={{ fontWeight: 1000, marginBottom: 8 }}>{r?.nom || "—"}</div>
           <div style={{ fontSize: 13.5, fontWeight: 900, opacity: 0.85 }}>{tNom}</div>
 
-          <Stepper />
+          <TimelineHorizontal />
 
           {/* ÉTAPE 1 — ADMIN DÉCISION */}
           {!stepAdminDecisionDone && isAdmin && status === "brise" ? (
             <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-              <div className="pt-modalLabel">Étape 1 — Décision admin</div>
+              <div className="pt-modalLabel">Étape 2 — Décision admin</div>
 
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
                 <button
@@ -700,18 +862,27 @@ export default function RepairTimelineModal({
               {adminChoice === "reparer" ? (
                 <div style={{ marginTop: 12 }}>
                   <div className="pt-modalLabel">Numéro PO (obligatoire)</div>
-                  <input className="pt-input" value={adminPo} onChange={(e) => setAdminPo(e.target.value)} placeholder="ex: PO-12345" />
+                  <input
+                    className="pt-input"
+                    value={adminPo}
+                    onChange={(e) => setAdminPo(e.target.value)}
+                    placeholder="ex: PO-12345"
+                  />
                 </div>
               ) : null}
 
               <div style={{ marginTop: 12 }}>
                 <div className="pt-modalLabel">Note (obligatoire)</div>
-                <input className="pt-input" value={adminNote} onChange={(e) => setAdminNote(e.target.value)} placeholder="Ex: instructions" />
+                <input
+                  className="pt-input"
+                  value={adminNote}
+                  onChange={(e) => setAdminNote(e.target.value)}
+                  placeholder="Ex: instructions"
+                />
               </div>
             </div>
           ) : null}
 
-          {/* Résumé décision */}
           {stepAdminDecisionDone ? (
             <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
               <div className="pt-modalLabel">Décision admin</div>
@@ -738,7 +909,12 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 2 — Envoyé à Styro</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input className="pt-input" value={doneBy} onChange={(e) => setDoneBy(e.target.value)} placeholder="ex: Jo / Phil" />
+                    <input
+                      className="pt-input"
+                      value={doneBy}
+                      onChange={(e) => setDoneBy(e.target.value)}
+                      placeholder="ex: Jo / Phil"
+                    />
                   </div>
                 </div>
               ) : null}
@@ -748,7 +924,12 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 3 — Reçu</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Note (optionnel)</div>
-                    <input className="pt-input" value={styroRecuNote} onChange={(e) => setStyroRecuNote(e.target.value)} placeholder="ex: reçu au bureau" />
+                    <input
+                      className="pt-input"
+                      value={styroRecuNote}
+                      onChange={(e) => setStyroRecuNote(e.target.value)}
+                      placeholder="ex: reçu au bureau"
+                    />
                   </div>
                 </div>
               ) : null}
@@ -767,7 +948,12 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 5 — Renvoyé</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Note (optionnel)</div>
-                    <input className="pt-input" value={styroRenvoyeNote} onChange={(e) => setStyroRenvoyeNote(e.target.value)} placeholder="ex: renvoyé au trailer / à Jo" />
+                    <input
+                      className="pt-input"
+                      value={styroRenvoyeNote}
+                      onChange={(e) => setStyroRenvoyeNote(e.target.value)}
+                      placeholder="ex: renvoyé au trailer / à Jo"
+                    />
                   </div>
                 </div>
               ) : null}
@@ -777,7 +963,12 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 6 — Reçu et remis dans le trailer</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input className="pt-input" value={doneBy} onChange={(e) => setDoneBy(e.target.value)} placeholder="ex: Jo / Phil" />
+                    <input
+                      className="pt-input"
+                      value={doneBy}
+                      onChange={(e) => setDoneBy(e.target.value)}
+                      placeholder="ex: Jo / Phil"
+                    />
                   </div>
                 </div>
               ) : null}
@@ -793,12 +984,22 @@ export default function RepairTimelineModal({
 
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Porté à (obligatoire)</div>
-                    <input className="pt-input" value={porterWhere} onChange={(e) => setPorterWhere(e.target.value)} placeholder="ex: Garage X / Atelier Y" />
+                    <input
+                      className="pt-input"
+                      value={porterWhere}
+                      onChange={(e) => setPorterWhere(e.target.value)}
+                      placeholder="ex: Garage X / Atelier Y"
+                    />
                   </div>
 
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input className="pt-input" value={doneBy} onChange={(e) => setDoneBy(e.target.value)} placeholder="ex: Jo / Phil" />
+                    <input
+                      className="pt-input"
+                      value={doneBy}
+                      onChange={(e) => setDoneBy(e.target.value)}
+                      placeholder="ex: Jo / Phil"
+                    />
                   </div>
 
                   <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 850, opacity: 0.75 }}>
@@ -812,7 +1013,12 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 3 — Je l’ai été le chercher</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input className="pt-input" value={doneBy} onChange={(e) => setDoneBy(e.target.value)} placeholder="ex: Jo / Phil" />
+                    <input
+                      className="pt-input"
+                      value={doneBy}
+                      onChange={(e) => setDoneBy(e.target.value)}
+                      placeholder="ex: Jo / Phil"
+                    />
                   </div>
                 </div>
               ) : null}
@@ -822,7 +1028,12 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 4 — Prêt à l’emploi</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input className="pt-input" value={doneBy} onChange={(e) => setDoneBy(e.target.value)} placeholder="ex: Jo / Phil" />
+                    <input
+                      className="pt-input"
+                      value={doneBy}
+                      onChange={(e) => setDoneBy(e.target.value)}
+                      placeholder="ex: Jo / Phil"
+                    />
                   </div>
                 </div>
               ) : null}
@@ -832,7 +1043,12 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 5 — Remis dans le trailer</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input className="pt-input" value={doneBy} onChange={(e) => setDoneBy(e.target.value)} placeholder="ex: Jo / Phil" />
+                    <input
+                      className="pt-input"
+                      value={doneBy}
+                      onChange={(e) => setDoneBy(e.target.value)}
+                      placeholder="ex: Jo / Phil"
+                    />
                   </div>
                 </div>
               ) : null}
@@ -916,4 +1132,7 @@ export default function RepairTimelineModal({
       </div>
     </div>
   );
+
+  // ✅ PORTAL => plus jamais coincé sous un sticky header
+  return createPortal(modal, document.body);
 }

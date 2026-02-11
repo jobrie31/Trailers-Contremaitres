@@ -1,5 +1,6 @@
 // src/PanelReparations.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { auth, db } from "./firebaseConfig";
 import {
   addDoc,
@@ -31,10 +32,6 @@ function isUniteLabel(label) {
   return n === "unite" || n === "unité" || n.includes("unité") || n.includes("unite");
 }
 
-/**
- * Reproduit le label riche (Produit + fields) utilisé dans PageTrailers
- * Retourne: "Nom — Champ: valeur • Champ2: valeur2"
- */
 function optionLabelForEquipement(eq, catsGlobal) {
   const head = (eq?.nom || "").trim() || "—";
   const extras = [];
@@ -66,27 +63,94 @@ function optionLabelForEquipement(eq, catsGlobal) {
   return extras.length ? `${head} — ${extras.join(" • ")}` : head;
 }
 
+function Portal({ children, enabled }) {
+  if (!enabled) return null;
+  if (typeof document === "undefined") return null;
+  return createPortal(children, document.body);
+}
+
+/**
+ * ✅ Détection "À QUI DE RÉPONDRE" (clignotant rouge)
+ * - Travailleur:
+ *   - adminActionType = envoyer à Styro  => worker doit confirmer (toStyroAt vide)
+ *   - adminActionType = aller porter réparateur => worker doit confirmer (porterAt vide)
+ *   - pretAt rempli mais chercherAt vide => worker doit aller chercher / confirmer
+ *   - suivi (followUpText) sur "brisé à jeté" => worker doit confirmer/voir
+ * - Admin:
+ *   - status "brise" sans adminActionType => admin doit décider quoi faire
+ *   - toStyroAt rempli mais styroRecuAt vide => admin doit confirmer réception à Styro
+ */
+function computeTurnInfo(r, isAdmin) {
+  const status = (r?.status || "").toString().trim().toLowerCase();
+  const adminActionType = (r?.adminActionType || "").toString().trim().toLowerCase();
+
+  const hasFollowUp = !!(r?.followUpText || "").toString().trim();
+
+  // --- Heuristiques mots-clés ---
+  const isActionStyro =
+    adminActionType.includes("styro") ||
+    adminActionType.includes("to_styro") ||
+    adminActionType.includes("envoyer") ||
+    adminActionType.includes("send");
+
+  const isActionPorter =
+    adminActionType.includes("porter") ||
+    adminActionType.includes("aller") ||
+    adminActionType.includes("réparateur") ||
+    adminActionType.includes("reparateur") ||
+    adminActionType.includes("repair") ||
+    adminActionType.includes("shop");
+
+  if (!isAdmin) {
+    // ✅ Travailleur: “À répondre”
+    if (hasFollowUp && status === "jete") {
+      return { needsMe: true, label: "À répondre: suivi", kind: "followup" };
+    }
+
+    if (adminActionType) {
+      if (isActionStyro && !r?.toStyroAt) {
+        return { needsMe: true, label: "À répondre: envoyer à Styro", kind: "styro_send" };
+      }
+      if (isActionPorter && !r?.porterAt) {
+        return { needsMe: true, label: "À répondre: aller porter", kind: "porter" };
+      }
+    }
+
+    if (r?.pretAt && !r?.chercherAt) {
+      return { needsMe: true, label: "À répondre: aller chercher", kind: "pickup" };
+    }
+
+    return { needsMe: false, label: "", kind: "" };
+  }
+
+  // ✅ Admin: “À répondre”
+  if (status === "brise" && !adminActionType) {
+    return { needsMe: true, label: "À répondre: décider action", kind: "admin_decide" };
+  }
+
+  if (r?.toStyroAt && !r?.styroRecuAt) {
+    return { needsMe: true, label: "À répondre: réception Styro", kind: "admin_styro_receive" };
+  }
+
+  return { needsMe: false, label: "", kind: "" };
+}
+
 export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, equipements, catsGlobal = [] }) {
   const [rows, setRows] = useState([]);
-
   const [dragOver, setDragOver] = useState(false);
 
-  // ✅ Modal drop -> choisir quantité + destination (brisé / jeté)
   const [dropOpen, setDropOpen] = useState(false);
   const [dropPayload, setDropPayload] = useState(null);
   const [dropQty, setDropQty] = useState(1);
-  const [dropDest, setDropDest] = useState("brise"); // "brise" | "jete"
+  const [dropDest, setDropDest] = useState("brise");
 
-  // ✅ Suivi (Brisé à jeté)
   const [suiviOpen, setSuiviOpen] = useState(false);
   const [suiviRow, setSuiviRow] = useState(null);
   const [suiviText, setSuiviText] = useState("");
 
-  // ✅ Popup "Confirmer" (lecture pour l’instant)
   const [suiviViewOpen, setSuiviViewOpen] = useState(false);
   const [suiviViewRow, setSuiviViewRow] = useState(null);
 
-  // ✅ Timeline modal
   const [tlOpen, setTlOpen] = useState(false);
   const [tlRow, setTlRow] = useState(null);
 
@@ -99,9 +163,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     setTlRow(null);
   }
 
-  // -------------------------
-  // Helpers trailerId/trailerNom par ligne (vue globale admin)
-  // -------------------------
   function getRowTrailerId(r) {
     if (isAdmin) return (r?.__trailerId || r?.trailerId || "").toString().trim() || null;
     return (trailerId || "").toString().trim() || null;
@@ -113,10 +174,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     return prop || "—";
   }
 
-  // -------------------------
-  // ✅ Notifications helpers
-  // - on utilise notifications/{repId} (même id que la réparation)
-  // -------------------------
   async function notifDone(repId, doneAction = "treated") {
     const id = (repId || "").toString().trim();
     if (!id) return;
@@ -152,9 +209,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     }
   }
 
-  // -------------------------
-  // Historique helper
-  // -------------------------
   async function logHistory(eventName, payload = {}) {
     try {
       const u = auth.currentUser;
@@ -165,18 +219,14 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
       await addDoc(collection(db, "reparations_history"), {
         ts: serverTimestamp(),
         trackId: payload?.trackId || null,
-
         trailerId: tId,
         trailerNom: tNom,
-
         byUid: u?.uid || null,
         event: (eventName || "").toString().trim() || "—",
-
         nom: payload?.nom ?? null,
         qty: payload?.qty ?? null,
         status: payload?.status ?? null,
         equipementId: payload?.equipementId ?? null,
-
         note: payload?.note ?? null,
         po: payload?.po ?? null,
         followUpText: payload?.followUpText ?? null,
@@ -188,11 +238,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     }
   }
 
-  // -------------------------
-  // ✅ Snapshot:
-  // - Admin: collectionGroup("reparations")
-  // - Non-admin: trailers/{trailerId}/reparations
-  // -------------------------
+  // ✅ reset + snapshot
   useEffect(() => {
     setRows([]);
     setDragOver(false);
@@ -331,10 +377,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
       .map((p) => p.trim())
       .filter(Boolean);
 
-    const pick =
-      parts.find((p) => /courant|amp|amperage|amp[eé]rage|current/i.test(p)) ||
-      parts[0] ||
-      "";
+    const pick = parts.find((p) => /courant|amp|amperage|amp[eé]rage|current/i.test(p)) || parts[0] || "";
 
     return cleanValueOnly(stripCaracteristiquePrefix(pick));
   }
@@ -373,7 +416,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     if (dimension) parts.push(`Dim: ${dimension}`);
 
     const remarque = (eq?.remarque ?? eq?.note ?? details?.remarque ?? details?.note ?? "").toString().trim() || "";
-
     return { line: parts.join(" • "), remarque };
   }
 
@@ -408,9 +450,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     }
   }
 
-  // =========================
-  // ✅ ADMIN SEULEMENT : Suivi (écrire)
-  // =========================
   function openSuiviModal(r) {
     if (!isAdmin) return;
     setSuiviRow(r);
@@ -464,9 +503,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     setSuiviViewOpen(true);
   }
 
-  // =========================
-  // Drag & drop depuis les items du trailer
-  // =========================
   function parseDroppedPayload(e) {
     try {
       const raw = e.dataTransfer.getData("application/x-gyrotech-item") || e.dataTransfer.getData("text/plain") || "";
@@ -536,14 +572,12 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           source: "dragdrop",
           from: { catId, itemId },
 
-          // --- timeline (nouveau)
-          adminActionType: null, // "styro" | "reparer"
+          adminActionType: null,
           adminActionNote: null,
           adminActionPo: null,
           adminActionAt: null,
           adminActionByUid: null,
 
-          // chemin "reparer" (non-admin)
           porterAt: null,
           porterByUid: null,
           porterByName: null,
@@ -557,7 +591,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           pretByUid: null,
           pretByName: null,
 
-          // chemin "styro"
           toStyroAt: null,
           toStyroByUid: null,
           toStyroByName: null,
@@ -593,16 +626,15 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           },
         });
 
-        // ✅ NOTIF ADMIN (seulement si l'utilisateur actuel n'est PAS admin)
         if (!isAdmin) {
-          const nRef = doc(db, "notifications", repRef.id); // même id que la réparation
+          const nRef = doc(db, "notifications", repRef.id);
           tx.set(nRef, {
             targetRole: "admin",
             done: false,
             createdAt: serverTimestamp(),
             createdByUid: u.uid,
             type: "reparation_added",
-            status, // "brise" | "jete"
+            status,
             trailerId: trailerId || null,
             trailerNom: safeTrailerNom,
             repId: repRef.id,
@@ -663,7 +695,10 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     return (
       <button
         type="button"
-        onClick={onClick}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick?.();
+        }}
         title="Supprimer"
         aria-label="Supprimer"
         style={{
@@ -685,15 +720,39 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     );
   }
 
-  function ReparRow({ r, actions }) {
+  function ReparRow({ r, actions, onOpen, alertInfo }) {
     const car = inlineCaracteristiqueForRow(r);
     const tName = getRowTrailerNom(r);
+    const needs = !!alertInfo?.needsMe;
+    const label = (alertInfo?.label || "").toString().trim();
 
     return (
-      <div className="pr-row" style={{ padding: "10px 12px", margin: "0 0 10px 0" }}>
+      <div
+        className={`pr-row ${needs ? "pr-rowAlert" : ""}`}
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpen?.(r)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen?.(r);
+          }
+        }}
+        style={{ padding: "10px 12px", margin: "0 0 10px 0", cursor: "pointer" }}
+        title={needs ? label || "À répondre" : "Ouvrir la réparation"}
+      >
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 1000, marginBottom: 4, opacity: 0.9 }}>{tName}</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 4 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 1000, opacity: 0.9, minWidth: 0 }}>{tName}</div>
+
+              {needs ? (
+                <span className="replyBlinkPill" title={label || "À répondre"}>
+                  <span className="replyBlinkDot" />
+                  {label || "À répondre"}
+                </span>
+              ) : null}
+            </div>
 
             <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", lineHeight: 1.15 }}>
               <div className="pr-rowName" style={{ margin: 0, fontSize: 15, fontWeight: 1000 }}>
@@ -727,20 +786,63 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end", paddingTop: 2 }}>
-            {actions}
+            <div
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}
+            >
+              {actions}
+            </div>
           </div>
         </div>
       </div>
     );
   }
 
+  // ✅ lock scroll si un des modals locaux est ouvert
+  const localModalOpen = dropOpen || suiviOpen || suiviViewOpen;
+  useEffect(() => {
+    if (!localModalOpen) return;
+    const prev = document?.body?.style?.overflow;
+    if (document?.body) document.body.style.overflow = "hidden";
+    return () => {
+      if (document?.body) document.body.style.overflow = prev || "";
+    };
+  }, [localModalOpen]);
+
+  // ✅ Compte "à répondre" pour l'utilisateur connecté (admin ou travailleur)
+  const myTurnCount = useMemo(() => {
+    return (rows || []).reduce((acc, r) => {
+      const info = computeTurnInfo(r, !!isAdmin);
+      return acc + (info.needsMe ? 1 : 0);
+    }, 0);
+  }, [rows, isAdmin]);
+
+  // ✅ (optionnel) broadcast pour AppShell si tu veux faire clignoter la topbar via un listener
+  useEffect(() => {
+    try {
+      window.dispatchEvent(new CustomEvent("app_turn_alert", { detail: { count: myTurnCount } }));
+    } catch {
+      // ignore
+    }
+  }, [myTurnCount]);
+
   return (
     <div className="pr-rail">
-      {/* Header + Dropzone */}
       <div className="pr-card pr-headCard">
         <div className="pr-headTop">
           <div>
-            <div className="pr-title">Bris / Réparation</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <div className="pr-title">Bris / Réparation</div>
+
+              {myTurnCount > 0 ? (
+                <span className="replyBlinkPill" title="Tu as des actions à faire">
+                  <span className="replyBlinkDot" />
+                  À répondre: {myTurnCount}
+                </span>
+              ) : null}
+            </div>
+
             {isAdmin ? (
               <div style={{ marginTop: 2, fontSize: 12, opacity: 0.75 }}>
                 Vue admin: <b>tous les trailers</b>
@@ -763,7 +865,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         </div>
       </div>
 
-      {/* Brisé */}
       <div className="pr-card">
         <div className="pr-sectionHead">
           <div className="pr-sectionTitle">
@@ -778,25 +879,26 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           <div className="pr-empty">Aucun item brisé.</div>
         ) : (
           <div className="pr-list">
-            {broken.map((r) => (
-              <ReparRow
-                key={`${r.__trailerId || "t"}_${r.id}`}
-                r={r}
-                actions={
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <button className="pr-btn pr-btnGhost" type="button" onClick={() => openTimeline(r)}>
-                      🕘 Timeline
-                    </button>
-                    <TinyX onClick={() => removeRow(r)} />
-                  </div>
-                }
-              />
-            ))}
+            {broken.map((r) => {
+              const alertInfo = computeTurnInfo(r, !!isAdmin);
+              return (
+                <ReparRow
+                  key={`${r.__trailerId || "t"}_${r.id}`}
+                  r={r}
+                  onOpen={openTimeline}
+                  alertInfo={alertInfo}
+                  actions={
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <TinyX onClick={() => removeRow(r)} />
+                    </div>
+                  }
+                />
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Brisé à jeté */}
       <div className="pr-card">
         <div className="pr-sectionHead">
           <div className="pr-sectionTitle">
@@ -813,6 +915,8 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           <div className="pr-list">
             {trashed.map((r) => {
               const hasFollowUp = !!(r?.followUpText || "").toString().trim();
+              const alertInfo = computeTurnInfo(r, !!isAdmin);
+
               return (
                 <div
                   key={`${r.__trailerId || "t"}_${r.id}`}
@@ -829,16 +933,32 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
                 >
                   <ReparRow
                     r={r}
+                    onOpen={openTimeline}
+                    alertInfo={alertInfo}
                     actions={
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
                         {isAdmin && !hasFollowUp ? (
-                          <button className="pr-btn pr-btnGhost" type="button" onClick={() => openSuiviModal(r)}>
+                          <button
+                            className="pr-btn pr-btnGhost"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSuiviModal(r);
+                            }}
+                          >
                             📝 Suivi
                           </button>
                         ) : null}
 
                         {!isAdmin && hasFollowUp ? (
-                          <button className="pr-btn pr-btnGhost" type="button" onClick={() => openSuiviViewModal(r)}>
+                          <button
+                            className="pr-btn pr-btnGhost"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSuiviViewModal(r);
+                            }}
+                          >
                             ✅ Confirmer
                           </button>
                         ) : null}
@@ -854,7 +974,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         )}
       </div>
 
-      {/* En réparation */}
       <div className="pr-card">
         <div className="pr-sectionHead">
           <div className="pr-sectionTitle">
@@ -869,147 +988,155 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           <div className="pr-empty">Aucun item en réparation.</div>
         ) : (
           <div className="pr-list">
-            {inRepair.map((r) => (
-              <ReparRow
-                key={`${r.__trailerId || "t"}_${r.id}`}
-                r={r}
-                actions={
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <button className="pr-btn pr-btnGhost" type="button" onClick={() => openTimeline(r)}>
-                      🕘 Timeline
-                    </button>
-                    <TinyX onClick={() => removeRow(r)} />
-                  </div>
-                }
-              />
-            ))}
+            {inRepair.map((r) => {
+              const alertInfo = computeTurnInfo(r, !!isAdmin);
+              return (
+                <ReparRow
+                  key={`${r.__trailerId || "t"}_${r.id}`}
+                  r={r}
+                  onOpen={openTimeline}
+                  alertInfo={alertInfo}
+                  actions={
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <TinyX onClick={() => removeRow(r)} />
+                    </div>
+                  }
+                />
+              );
+            })}
           </div>
         )}
       </div>
 
-      {/* Modal drop (quantité + destination) */}
-      {dropOpen && dropPayload && (
-        <div className="pt-modalOverlay" onMouseDown={() => setDropOpen(false)}>
-          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="pt-modalHead">
-              <div className="pt-modalTitle">Drag & drop</div>
-              <button className="pt-modalClose" type="button" onClick={() => setDropOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="pt-modalBody">
-              <div style={{ fontWeight: 1000, marginBottom: 8 }}>{dropPayload.nom || "—"}</div>
-              <div style={{ opacity: 0.75, marginBottom: 12 }}>
-                Dispo dans le trailer: <b>{Number(dropPayload.qty || 0)}</b>
+      {/* ✅ Modal drop => PORTAL */}
+      <Portal enabled={dropOpen && !!dropPayload}>
+        {dropOpen && dropPayload ? (
+          <div className="pt-modalOverlay" onMouseDown={() => setDropOpen(false)}>
+            <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="pt-modalHead">
+                <div className="pt-modalTitle">Drag & drop</div>
+                <button className="pt-modalClose" type="button" onClick={() => setDropOpen(false)}>
+                  ✕
+                </button>
               </div>
 
-              <div className="pt-modalBlock" style={{ background: "#fff" }}>
-                <div className="pt-modalLabel">Type</div>
-                <select className="pt-select" value={dropDest} onChange={(e) => setDropDest(e.target.value)}>
-                  <option value="brise">Brisé</option>
-                  <option value="jete">Brisé à jeté</option>
-                </select>
-
-                <div className="pt-modalLabel" style={{ marginTop: 10 }}>
-                  Quantité
+              <div className="pt-modalBody">
+                <div style={{ fontWeight: 1000, marginBottom: 8 }}>{dropPayload.nom || "—"}</div>
+                <div style={{ opacity: 0.75, marginBottom: 12 }}>
+                  Dispo dans le trailer: <b>{Number(dropPayload.qty || 0)}</b>
                 </div>
-                <input
-                  className="pt-input pt-noSpin"
-                  type="number"
-                  min="1"
-                  max={Number(dropPayload.qty || 0) || undefined}
-                  value={dropQty}
-                  onChange={(e) => setDropQty(e.target.value)}
-                  placeholder="1"
-                />
-              </div>
-            </div>
 
-            <div className="pt-modalFoot">
-              <button className="pt-btn" type="button" onClick={confirmDropToBroken}>
-                Confirmer
-              </button>
-              <button className="pt-btn pt-btnGhost" type="button" onClick={() => setDropOpen(false)}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+                <div className="pt-modalBlock" style={{ background: "#fff" }}>
+                  <div className="pt-modalLabel">Type</div>
+                  <select className="pt-select" value={dropDest} onChange={(e) => setDropDest(e.target.value)}>
+                    <option value="brise">Brisé</option>
+                    <option value="jete">Brisé à jeté</option>
+                  </select>
 
-      {/* Modal Suivi (ADMIN seulement) */}
-      {suiviOpen && suiviRow && isAdmin && (
-        <div className="pt-modalOverlay" onMouseDown={() => setSuiviOpen(false)}>
-          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="pt-modalHead">
-              <div className="pt-modalTitle">Suivi — Brisé à jeté</div>
-              <button className="pt-modalClose" type="button" onClick={() => setSuiviOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="pt-modalBody">
-              <div style={{ fontWeight: 1000, marginBottom: 8 }}>{suiviRow.nom || "—"}</div>
-              <div style={{ marginTop: 8, fontSize: 14.5, fontWeight: 1000, opacity: 0.9 }}>{getRowTrailerNom(suiviRow)}</div>
-
-              <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 10 }}>
-                <div className="pt-modalLabel">Quoi faire ?</div>
-                <textarea
-                  className="pt-input"
-                  style={{ minHeight: 110, resize: "vertical" }}
-                  value={suiviText}
-                  onChange={(e) => setSuiviText(e.target.value)}
-                  placeholder="Ex: Apporter au bureau / envoyer photo / demander à Phil / etc."
-                />
-              </div>
-            </div>
-
-            <div className="pt-modalFoot">
-              <button className="pt-btn" type="button" onClick={confirmSuivi}>
-                Confirmer
-              </button>
-              <button className="pt-btn pt-btnGhost" type="button" onClick={() => setSuiviOpen(false)}>
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal Confirmer (lecture) */}
-      {suiviViewOpen && suiviViewRow && (
-        <div className="pt-modalOverlay" onMouseDown={() => setSuiviViewOpen(false)}>
-          <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="pt-modalHead">
-              <div className="pt-modalTitle">Confirmer — Suivi</div>
-              <button className="pt-modalClose" type="button" onClick={() => setSuiviViewOpen(false)}>
-                ✕
-              </button>
-            </div>
-
-            <div className="pt-modalBody">
-              <div style={{ fontWeight: 1000, marginBottom: 8 }}>{suiviViewRow.nom || "—"}</div>
-              <div style={{ marginTop: 8, fontSize: 14.5, fontWeight: 1000, opacity: 0.9 }}>{getRowTrailerNom(suiviViewRow)}</div>
-
-              <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 10 }}>
-                <div className="pt-modalLabel">À faire</div>
-                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
-                  {(suiviViewRow.followUpText || "").toString().trim() || "—"}
+                  <div className="pt-modalLabel" style={{ marginTop: 10 }}>
+                    Quantité
+                  </div>
+                  <input
+                    className="pt-input pt-noSpin"
+                    type="number"
+                    min="1"
+                    max={Number(dropPayload.qty || 0) || undefined}
+                    value={dropQty}
+                    onChange={(e) => setDropQty(e.target.value)}
+                    placeholder="1"
+                  />
                 </div>
               </div>
-            </div>
 
-            <div className="pt-modalFoot">
-              <button className="pt-btn" type="button" onClick={() => setSuiviViewOpen(false)}>
-                OK
-              </button>
+              <div className="pt-modalFoot">
+                <button className="pt-btn" type="button" onClick={confirmDropToBroken}>
+                  Confirmer
+                </button>
+                <button className="pt-btn pt-btnGhost" type="button" onClick={() => setDropOpen(false)}>
+                  Annuler
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        ) : null}
+      </Portal>
 
-      {/* ✅ Timeline modal */}
+      {/* ✅ Modal Suivi (ADMIN) => PORTAL */}
+      <Portal enabled={suiviOpen && !!suiviRow && isAdmin}>
+        {suiviOpen && suiviRow && isAdmin ? (
+          <div className="pt-modalOverlay" onMouseDown={() => setSuiviOpen(false)}>
+            <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="pt-modalHead">
+                <div className="pt-modalTitle">Suivi — Brisé à jeté</div>
+                <button className="pt-modalClose" type="button" onClick={() => setSuiviOpen(false)}>
+                  ✕
+                </button>
+              </div>
+
+              <div className="pt-modalBody">
+                <div style={{ fontWeight: 1000, marginBottom: 8 }}>{suiviRow.nom || "—"}</div>
+                <div style={{ marginTop: 8, fontSize: 14.5, fontWeight: 1000, opacity: 0.9 }}>{getRowTrailerNom(suiviRow)}</div>
+
+                <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 10 }}>
+                  <div className="pt-modalLabel">Quoi faire ?</div>
+                  <textarea
+                    className="pt-input"
+                    style={{ minHeight: 110, resize: "vertical" }}
+                    value={suiviText}
+                    onChange={(e) => setSuiviText(e.target.value)}
+                    placeholder="Ex: Apporter au bureau / envoyer photo / demander à Phil / etc."
+                  />
+                </div>
+              </div>
+
+              <div className="pt-modalFoot">
+                <button className="pt-btn" type="button" onClick={confirmSuivi}>
+                  Confirmer
+                </button>
+                <button className="pt-btn pt-btnGhost" type="button" onClick={() => setSuiviOpen(false)}>
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Portal>
+
+      {/* ✅ Modal Confirmer (lecture) => PORTAL */}
+      <Portal enabled={suiviViewOpen && !!suiviViewRow}>
+        {suiviViewOpen && suiviViewRow ? (
+          <div className="pt-modalOverlay" onMouseDown={() => setSuiviViewOpen(false)}>
+            <div className="pt-modal pt-modalSmall" onMouseDown={(e) => e.stopPropagation()}>
+              <div className="pt-modalHead">
+                <div className="pt-modalTitle">Confirmer — Suivi</div>
+                <button className="pt-modalClose" type="button" onClick={() => setSuiviViewOpen(false)}>
+                  ✕
+                </button>
+              </div>
+
+              <div className="pt-modalBody">
+                <div style={{ fontWeight: 1000, marginBottom: 8 }}>{suiviViewRow.nom || "—"}</div>
+                <div style={{ marginTop: 8, fontSize: 14.5, fontWeight: 1000, opacity: 0.9 }}>{getRowTrailerNom(suiviViewRow)}</div>
+
+                <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 10 }}>
+                  <div className="pt-modalLabel">À faire</div>
+                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.35 }}>
+                    {(suiviViewRow.followUpText || "").toString().trim() || "—"}
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-modalFoot">
+                <button className="pt-btn" type="button" onClick={() => setSuiviViewOpen(false)}>
+                  OK
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </Portal>
+
+      {/* ✅ Timeline modal (déjà en PORTAL dans RepairTimelineModal) */}
       <RepairTimelineModal
         open={tlOpen}
         onClose={closeTimeline}

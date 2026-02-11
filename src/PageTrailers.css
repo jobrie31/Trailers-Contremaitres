@@ -292,7 +292,10 @@
   background: rgba(255,255,255,0.6);
   position: sticky;
   top: 0;
-  z-index: 1;
+
+  /* ✅ IMPORTANT: garde sticky AU-DESSUS des lignes, mais PAS au-dessus des modals */
+  z-index: 2;
+
   white-space: nowrap;
   line-height: 1.05;
   vertical-align: middle;
@@ -442,7 +445,9 @@
   position: fixed;
   left: 18px;
   top: 92px;
-  z-index: 80;
+
+  /* ✅ IMPORTANT: reste en dessous des modals */
+  z-index: 200;
 }
 
 /* =========================
@@ -456,7 +461,12 @@
   align-items:center;
   justify-content:center;
   padding: 16px;
-  z-index: 50;
+
+  /* ✅ FIX BUG: le header sticky du tableau ne doit JAMAIS passer par-dessus le popup */
+  z-index: 9999;
+
+  /* crée un nouveau contexte d'empilement, aide sur certains navigateurs */
+  isolation: isolate;
 }
 
 .pt-modal{
@@ -466,6 +476,9 @@
   border: 1px solid rgba(15,23,42,0.12);
   box-shadow: 0 20px 55px rgba(0,0,0,0.25);
   overflow: hidden;
+
+  position: relative;
+  z-index: 10000;
 }
 
 .pt-modalSmall{
