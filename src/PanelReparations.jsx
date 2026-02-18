@@ -76,17 +76,17 @@ function Portal({ children, enabled }) {
  *   - adminActionType = aller porter réparateur => worker doit confirmer (porterAt vide)
  *   - pretAt rempli mais chercherAt vide => worker doit aller chercher / confirmer
  *   - suivi (followUpText) sur "brisé à jeté" => worker doit confirmer/voir
+ *   - styroRenvoyeAt rempli => worker doit confirmer "Reçu et remis dans le trailer"
  * - Admin:
  *   - status "brise" sans adminActionType => admin doit décider quoi faire
  *   - toStyroAt rempli mais styroRecuAt vide => admin doit confirmer réception à Styro
+ *   - ✅ NEW: needsAdminRepairConfirm true (ou styroRecuAt fait mais pas styroMiseReparationAt) => admin doit faire Étape 5 "Mettre en réparation"
  */
 function computeTurnInfo(r, isAdmin) {
   const status = (r?.status || "").toString().trim().toLowerCase();
   const adminActionType = (r?.adminActionType || "").toString().trim().toLowerCase();
-
   const hasFollowUp = !!(r?.followUpText || "").toString().trim();
 
-  // --- Heuristiques mots-clés ---
   const isActionStyro =
     adminActionType.includes("styro") ||
     adminActionType.includes("to_styro") ||
@@ -102,7 +102,6 @@ function computeTurnInfo(r, isAdmin) {
     adminActionType.includes("shop");
 
   if (!isAdmin) {
-    // ✅ Travailleur: “À répondre”
     if (hasFollowUp && status === "jete") {
       return { needsMe: true, label: "À répondre: suivi", kind: "followup" };
     }
@@ -111,6 +110,12 @@ function computeTurnInfo(r, isAdmin) {
       if (isActionStyro && !r?.toStyroAt) {
         return { needsMe: true, label: "À répondre: envoyer à Styro", kind: "styro_send" };
       }
+
+      // ✅ NEW: Étape 7 (après renvoyé)
+      if (isActionStyro && !!r?.styroRenvoyeAt) {
+        return { needsMe: true, label: "À répondre: remis trailer", kind: "styro_return" };
+      }
+
       if (isActionPorter && !r?.porterAt) {
         return { needsMe: true, label: "À répondre: aller porter", kind: "porter" };
       }
@@ -123,13 +128,22 @@ function computeTurnInfo(r, isAdmin) {
     return { needsMe: false, label: "", kind: "" };
   }
 
-  // ✅ Admin: “À répondre”
+  // ✅ Admin
   if (status === "brise" && !adminActionType) {
     return { needsMe: true, label: "À répondre: décider action", kind: "admin_decide" };
   }
 
   if (r?.toStyroAt && !r?.styroRecuAt) {
     return { needsMe: true, label: "À répondre: réception Styro", kind: "admin_styro_receive" };
+  }
+
+  // ✅ NEW: Étape 5 tant que non confirmé => ORANGE + "à répondre"
+  // On supporte le flag officiel + fallback logique (styro reçu mais pas mis en réparation)
+  const needsRepairConfirm =
+    !!r?.needsAdminRepairConfirm || (isActionStyro && !!r?.styroRecuAt && !r?.styroMiseReparationAt && status === "brise");
+
+  if (needsRepairConfirm) {
+    return { needsMe: true, label: "À répondre: mettre en réparation", kind: "admin_repair_confirm" };
   }
 
   return { needsMe: false, label: "", kind: "" };
@@ -296,6 +310,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     return equipOptions.find((e) => (e.id || "").toString().trim() === eid) || null;
   }
 
+  // ---------- Dates ----------
   function fmtDateFR(d) {
     if (!d) return "—";
     try {
@@ -307,19 +322,19 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
       return "—";
     }
   }
-
-  function dateFromCreatedAt(createdAt) {
-    if (!createdAt) return null;
-    if (typeof createdAt?.toDate === "function") return createdAt.toDate();
-    if (createdAt instanceof Date) return createdAt;
-    const n = Number(createdAt);
+  function dateFromTs(ts) {
+    if (!ts) return null;
+    if (typeof ts?.toDate === "function") return ts.toDate();
+    if (ts instanceof Date) return ts;
+    const n = Number(ts);
     if (Number.isFinite(n)) return new Date(n);
     return null;
   }
-
   function rowDate(r) {
-    const d = dateFromCreatedAt(r?.createdAt);
-    return fmtDateFR(d);
+    return fmtDateFR(dateFromTs(r?.createdAt));
+  }
+  function rowStyroRecuDate(r) {
+    return fmtDateFR(dateFromTs(r?.styroRecuAt));
   }
 
   function stripCaracteristiquePrefix(s) {
@@ -378,7 +393,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
       .filter(Boolean);
 
     const pick = parts.find((p) => /courant|amp|amperage|amp[eé]rage|current/i.test(p)) || parts[0] || "";
-
     return cleanValueOnly(stripCaracteristiquePrefix(pick));
   }
 
@@ -599,11 +613,14 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           styroRecuByUid: null,
           styroRecuNote: null,
 
+          needsAdminRepairConfirm: false, // ✅ NEW: flag ORANGE (étape 5)
+
           styroMiseReparationAt: null,
           styroMiseReparationByUid: null,
 
           styroRenvoyeAt: null,
           styroRenvoyeByUid: null,
+          styroRenvoyeTo: null,
           styroRenvoyeNote: null,
         });
 
@@ -726,6 +743,11 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     const needs = !!alertInfo?.needsMe;
     const label = (alertInfo?.label || "").toString().trim();
 
+    const orangeWaiting =
+      r?.status === "brise" && (!!r?.needsAdminRepairConfirm || (!!r?.styroRecuAt && !r?.styroMiseReparationAt));
+
+    const orangeDate = orangeWaiting ? rowStyroRecuDate(r) : "";
+
     return (
       <div
         className={`pr-row ${needs ? "pr-rowAlert" : ""}`}
@@ -738,8 +760,17 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
             onOpen?.(r);
           }
         }}
-        style={{ padding: "10px 12px", margin: "0 0 10px 0", cursor: "pointer" }}
-        title={needs ? label || "À répondre" : "Ouvrir la réparation"}
+        style={{
+          padding: "10px 12px",
+          margin: "0 0 10px 0",
+          cursor: "pointer",
+
+          // ✅ ORANGE dans le tableau "Brisé" tant que l’admin n’a pas confirmé Étape 5
+          background: orangeWaiting ? "rgba(249,115,22,0.14)" : undefined,
+          border: orangeWaiting ? "1px solid rgba(249,115,22,0.30)" : undefined,
+          borderRadius: orangeWaiting ? 14 : undefined,
+        }}
+        title={orangeWaiting ? `À mettre en réparation (reçu: ${orangeDate || "—"})` : needs ? label || "À répondre" : "Ouvrir la réparation"}
       >
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -750,6 +781,29 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
                 <span className="replyBlinkPill" title={label || "À répondre"}>
                   <span className="replyBlinkDot" />
                   {label || "À répondre"}
+                </span>
+              ) : null}
+
+              {/* ✅ Petit indicateur ORANGE + date dans la case */}
+              {orangeWaiting ? (
+                <span
+                  style={{
+                    marginLeft: 2,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 10px",
+                    borderRadius: 999,
+                    border: "1px solid rgba(249,115,22,0.30)",
+                    background: "rgba(249,115,22,0.12)",
+                    fontWeight: 1000,
+                    fontSize: 12,
+                    color: "rgba(124,45,18,0.95)",
+                    whiteSpace: "nowrap",
+                  }}
+                  title="Étape 5 en attente — Mettre en réparation"
+                >
+                  ⏳ En attente (reçu {orangeDate || "—"})
                 </span>
               ) : null}
             </div>
@@ -782,6 +836,13 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
               <span>
                 Qté: <b>{Number(r.qty || 0)}</b>
               </span>
+
+              {/* ✅ Date aussi dans la zone "meta" (au cas où tu veux juste voir ici) */}
+              {orangeWaiting ? (
+                <span style={{ fontWeight: 1000, color: "rgba(124,45,18,0.95)" }}>
+                  Reçu: <b>{orangeDate || "—"}</b>
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -818,7 +879,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     }, 0);
   }, [rows, isAdmin]);
 
-  // ✅ (optionnel) broadcast pour AppShell si tu veux faire clignoter la topbar via un listener
+  // ✅ broadcast pour App.jsx (topbar flash)
   useEffect(() => {
     try {
       window.dispatchEvent(new CustomEvent("app_turn_alert", { detail: { count: myTurnCount } }));

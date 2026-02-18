@@ -753,7 +753,7 @@ export default function PageTrailers() {
 
                     <input
                       className="pt-input pt-search pt-searchInline"
-                      placeholder="Rechercher un équipement dans ce trailer…"
+                      placeholder="Rechercher un équipement"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       disabled={!selectedTrailerId}
@@ -790,13 +790,6 @@ export default function PageTrailers() {
                                   <span aria-hidden="true" className="pt-dot" style={{ background: base }} />
                                   <span>{cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie"}</span>
                                 </div>
-
-                                <input
-                                  className="pt-input pt-catSearch"
-                                  placeholder="Rechercher…"
-                                  value={searchByCat?.[cat.id] || ""}
-                                  onChange={(e) => setSearchByCat((prev) => ({ ...prev, [cat.id]: e.target.value }))}
-                                />
                               </div>
 
                               <div className="pt-sectionRight">

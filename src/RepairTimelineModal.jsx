@@ -8,19 +8,24 @@ import { doc, updateDoc, serverTimestamp, runTransaction, collection } from "fir
  * Deux chemins:
  *
  * A) adminActionType="styro"
- *   1) Admin décide "Envoyer à Styro" + note
- *   2) Non-admin confirme: "Envoyé à Styro" (fait par)
- *   3) Admin: "Reçu" (note optionnelle)
- *   4) Admin: "Mis en réparation"
- *   5) Admin: "Renvoyé" (note optionnelle)
- *   6) Non-admin: "Reçu et remis dans le trailer" => retour qty + delete doc
+ *   1) Brisé (créé dans le tableau "Brisé")
+ *   2) Décision admin
+ *   3) Non-admin: "Envoyé à Styro" (fait par = user actuel)
+ *   4) Admin: "Reçu" (note optionnelle)  -> met un flag pour rendre la case ORANGE dans "Brisé"
+ *   5) Admin: "Mis en réparation" (passe status="reparation", retire le flag ORANGE)
+ *   6) Admin: "Renvoyé à ..." (à + note optionnelle) (reste dans "En réparation")
+ *   7) Non-admin: "Reçu et remis dans le trailer" => retour qty + delete doc
  *
  * B) adminActionType="reparer"
- *   1) Admin décide "Aller faire réparer" + PO + note
- *   2) Non-admin: "Je l'ai porté à ..." (fait par + endroit) -> status "reparation"
- *   3) Non-admin: "Je l'ai été le chercher"
- *   4) Non-admin: "Prêt à l'emploi"
- *   5) Non-admin: "Remis dans le trailer" => retour qty + delete doc
+ *   1) Brisé
+ *   2) Décision admin
+ *   3) Non-admin: "Je l'ai porté à ..." (fait par = user actuel) -> status "reparation"
+ *   4) Non-admin: "Je l'ai été le chercher"
+ *   5) Non-admin: "Prêt à l'emploi"
+ *   6) Non-admin: "Remis dans le trailer" => retour qty + delete doc
+ *
+ * NOTE:
+ * - needsAdminRepairConfirm: true/false => à utiliser dans le tableau "Brisé" pour colorer la case ORANGE.
  */
 
 export default function RepairTimelineModal({
@@ -109,6 +114,14 @@ export default function RepairTimelineModal({
     }
   }
 
+  function currentUserName() {
+    return (
+      (auth.currentUser?.displayName || "").toString().trim() ||
+      (auth.currentUser?.email || "").toString().trim() ||
+      "—"
+    );
+  }
+
   const actionType = ((r?.adminActionType || "") + "").trim(); // "styro" | "reparer" | ""
 
   // ---------- forms ----------
@@ -116,10 +129,10 @@ export default function RepairTimelineModal({
   const [adminPo, setAdminPo] = useState("");
   const [adminNote, setAdminNote] = useState("");
 
-  const [doneBy, setDoneBy] = useState("");
   const [porterWhere, setPorterWhere] = useState("");
 
   const [styroRecuNote, setStyroRecuNote] = useState("");
+  const [styroRenvoyeTo, setStyroRenvoyeTo] = useState("");
   const [styroRenvoyeNote, setStyroRenvoyeNote] = useState("");
 
   useEffect(() => {
@@ -131,19 +144,15 @@ export default function RepairTimelineModal({
     setAdminPo((r?.adminActionPo || "").toString());
     setAdminNote((r?.adminActionNote || "").toString());
 
-    const defaultName =
-      (auth.currentUser?.displayName || "").toString().trim() ||
-      (auth.currentUser?.email || "").toString().trim() ||
-      "";
-    setDoneBy(defaultName);
-
     setPorterWhere((r?.porterWhere || "").toString());
 
     setStyroRecuNote((r?.styroRecuNote || "").toString());
+    setStyroRenvoyeTo((r?.styroRenvoyeTo || "").toString());
     setStyroRenvoyeNote((r?.styroRenvoyeNote || "").toString());
   }, [visible, r]);
 
   // ---------- step booleans ----------
+  const stepBriseDone = true; // la ligne existe => l'objet est "brisé" (étape 1)
   const stepAdminDecisionDone = !!r?.adminActionAt;
 
   // Path styro:
@@ -158,14 +167,14 @@ export default function RepairTimelineModal({
   const stepPretDone = !!r?.pretAt;
 
   // ---------- steps ----------
-  // ✅ AVANT décision admin:
-  //   Point 1 = date (createdAt si dispo, sinon "Créé")
-  //   Point 2 = "En attente admin"
+  // Step 1 = Brisé
+  // Step 2 = Décision admin
+  // Step 3 = Envoyé (styro) OU Porté (reparer)
   const steps = useMemo(() => {
     if (!stepAdminDecisionDone) {
       return [
-        { key: "created", labelShort: fmtDateFR(r?.createdAt) === "—" ? "Créé" : fmtDateFR(r?.createdAt), done: true },
-        { key: "wait_admin", labelShort: "En attente admin", done: false },
+        { key: "brise", labelShort: "Brisé", done: stepBriseDone },
+        { key: "decide", labelShort: "Décision", done: false },
       ];
     }
 
@@ -173,6 +182,7 @@ export default function RepairTimelineModal({
 
     if (path === "styro") {
       return [
+        { key: "brise", labelShort: "Brisé", done: stepBriseDone },
         { key: "decide", labelShort: "Décision", done: true },
         { key: "tostyro", labelShort: "Envoyé", done: stepToStyroDone },
         { key: "recu", labelShort: "Reçu", done: stepStyroRecuDone },
@@ -183,6 +193,7 @@ export default function RepairTimelineModal({
     }
 
     return [
+      { key: "brise", labelShort: "Brisé", done: stepBriseDone },
       { key: "decide", labelShort: "Décision", done: true },
       { key: "porte", labelShort: "Porté", done: stepPorteDone },
       { key: "cherche", labelShort: "Cherché", done: stepChercheDone },
@@ -193,6 +204,7 @@ export default function RepairTimelineModal({
     stepAdminDecisionDone,
     actionType,
     adminChoice,
+    stepBriseDone,
     stepToStyroDone,
     stepStyroRecuDone,
     stepStyroMiseReparationDone,
@@ -200,7 +212,6 @@ export default function RepairTimelineModal({
     stepPorteDone,
     stepChercheDone,
     stepPretDone,
-    r?.createdAt,
   ]);
 
   const activeIndex = useMemo(() => {
@@ -212,14 +223,12 @@ export default function RepairTimelineModal({
     const path = (stepAdminDecisionDone ? actionType : "") || "";
     const infos = {};
 
-    // ✅ infos avant décision admin
-    if (!stepAdminDecisionDone) {
-      infos.created = {
-        when: fmtDateTimeFR(r?.createdAt),
-        lines: ["Youston on a un problème"],
-      };
-      return infos;
-    }
+    infos.brise = {
+      when: fmtDateTimeFR(r?.createdAt),
+      lines: [fmtDateFR(r?.createdAt) === "—" ? "Marqué brisé." : `Marqué brisé le ${fmtDateFR(r?.createdAt)}.`],
+    };
+
+    if (!stepAdminDecisionDone) return infos;
 
     infos.decide = {
       when: fmtDateTimeFR(r?.adminActionAt),
@@ -231,9 +240,7 @@ export default function RepairTimelineModal({
             ? "Aller le faire réparer"
             : "—"
         }`,
-        (r?.adminActionPo || "").toString().trim()
-          ? `PO: ${(r?.adminActionPo || "").toString().trim()}`
-          : null,
+        (r?.adminActionPo || "").toString().trim() ? `PO: ${(r?.adminActionPo || "").toString().trim()}` : null,
         `Note: ${(r?.adminActionNote || "").toString().trim() || "—"}`,
       ].filter(Boolean),
     };
@@ -249,9 +256,7 @@ export default function RepairTimelineModal({
         infos.recu = {
           when: fmtDateTimeFR(r?.styroRecuAt),
           lines: [
-            (r?.styroRecuNote || "").toString().trim()
-              ? `Note: ${(r?.styroRecuNote || "").toString().trim()}`
-              : null,
+            (r?.styroRecuNote || "").toString().trim() ? `Note: ${(r?.styroRecuNote || "").toString().trim()}` : null,
           ].filter(Boolean),
         };
       }
@@ -262,9 +267,12 @@ export default function RepairTimelineModal({
         };
       }
       if (stepStyroRenvoyeDone) {
+        const to = (r?.styroRenvoyeTo || "").toString().trim() || "—";
+        const when = fmtDateTimeFR(r?.styroRenvoyeAt);
         infos.renvoye = {
-          when: fmtDateTimeFR(r?.styroRenvoyeAt),
+          when,
           lines: [
+            `Renvoyé à: ${to} (${when})`,
             (r?.styroRenvoyeNote || "").toString().trim()
               ? `Note: ${(r?.styroRenvoyeNote || "").toString().trim()}`
               : null,
@@ -472,7 +480,9 @@ export default function RepairTimelineModal({
     if (!isAdmin) return;
     if (!tId || !r?.id) return;
 
-    if (adminChoice !== "styro" && adminChoice !== "reparer") return alert("Choisis: Envoyer à Styro OU Aller le faire réparer.");
+    if (adminChoice !== "styro" && adminChoice !== "reparer") {
+      return alert("Choisis: Envoyer à Styro OU Aller le faire réparer.");
+    }
 
     const note = (adminNote || "").toString().trim();
     const po = (adminPo || "").toString().trim();
@@ -518,8 +528,8 @@ export default function RepairTimelineModal({
     if (!stepAdminDecisionDone) return alert("L’admin n’a pas encore décidé.");
     if ((actionType || "").trim() !== "styro") return alert("Cette ligne n’est pas en mode Styro.");
 
-    const who = (doneBy || "").toString().trim();
-    if (!who) return alert("“Fait par” obligatoire.");
+    const who = currentUserName(); // ✅ auto
+    if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     try {
       const u = auth.currentUser;
@@ -551,7 +561,7 @@ export default function RepairTimelineModal({
     if (!isAdmin) return;
     if (!tId || !r?.id) return;
     if ((actionType || "").trim() !== "styro") return alert("Pas le bon chemin.");
-    if (!stepToStyroDone) return alert("Le pas-admin doit d’abord confirmer “Envoyé à Styro”.");
+    if (!stepToStyroDone) return alert("Le travailleur doit d’abord confirmer “Envoyé à Styro”.");
 
     try {
       const u = auth.currentUser;
@@ -561,6 +571,7 @@ export default function RepairTimelineModal({
         styroRecuAt: serverTimestamp(),
         styroRecuByUid: u?.uid || null,
         styroRecuNote: note,
+        needsAdminRepairConfirm: true, // ✅ ORANGE dans le tableau "Brisé"
       });
 
       await logHistory?.("STYRO_RECU", {
@@ -594,6 +605,7 @@ export default function RepairTimelineModal({
         styroMiseReparationAt: serverTimestamp(),
         styroMiseReparationByUid: u?.uid || null,
         status: "reparation",
+        needsAdminRepairConfirm: false, // ✅ enlève l'ORANGE
       });
 
       await logHistory?.("STYRO_MIS_REPARATION", {
@@ -619,6 +631,9 @@ export default function RepairTimelineModal({
     if ((actionType || "").trim() !== "styro") return alert("Pas le bon chemin.");
     if (!stepStyroMiseReparationDone) return alert("Admin doit d’abord faire “Mis en réparation”.");
 
+    const to = (styroRenvoyeTo || "").toString().trim();
+    if (!to) return alert("“Renvoyé à …” obligatoire.");
+
     try {
       const u = auth.currentUser;
       const note = (styroRenvoyeNote || "").toString().trim() || null;
@@ -626,6 +641,7 @@ export default function RepairTimelineModal({
       await updateDoc(doc(db, "trailers", tId, "reparations", r.id), {
         styroRenvoyeAt: serverTimestamp(),
         styroRenvoyeByUid: u?.uid || null,
+        styroRenvoyeTo: to,
         styroRenvoyeNote: note,
       });
 
@@ -638,6 +654,7 @@ export default function RepairTimelineModal({
         status: "reparation",
         equipementId: r?.equipementId || null,
         note: note || null,
+        extra: { to },
       });
 
       await notifDone?.(r.id, "styro_renvoye_done");
@@ -654,8 +671,8 @@ export default function RepairTimelineModal({
     if ((actionType || "").trim() !== "styro") return alert("Pas le bon chemin.");
     if (!stepStyroRenvoyeDone) return alert("Admin doit d’abord faire “Renvoyé”.");
 
-    const who = (doneBy || "").toString().trim();
-    if (!who) return alert("“Fait par” obligatoire.");
+    const who = currentUserName(); // ✅ auto
+    if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     const ok = window.confirm("Confirmer: reçu et remis dans le trailer ?");
     if (!ok) return;
@@ -677,8 +694,8 @@ export default function RepairTimelineModal({
     if (!stepAdminDecisionDone) return alert("L’admin n’a pas encore décidé.");
     if ((actionType || "").trim() !== "reparer") return alert("Cette ligne n’est pas en mode “Aller faire réparer”.");
 
-    const who = (doneBy || "").toString().trim();
-    if (!who) return alert("“Fait par” obligatoire.");
+    const who = currentUserName(); // ✅ auto
+    if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     const where = (porterWhere || "").toString().trim();
     if (!where) return alert("“Porté à …” obligatoire.");
@@ -718,8 +735,8 @@ export default function RepairTimelineModal({
     if ((actionType || "").trim() !== "reparer") return alert("Pas le bon chemin.");
     if (!stepPorteDone) return alert("Faut d’abord faire “Je l’ai porté à …”.");
 
-    const who = (doneBy || "").toString().trim();
-    if (!who) return alert("“Fait par” obligatoire.");
+    const who = currentUserName(); // ✅ auto
+    if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     try {
       const u = auth.currentUser;
@@ -754,8 +771,8 @@ export default function RepairTimelineModal({
     if ((actionType || "").trim() !== "reparer") return alert("Pas le bon chemin.");
     if (!stepChercheDone) return alert("Faut d’abord faire “Je l’ai été le chercher”.");
 
-    const who = (doneBy || "").toString().trim();
-    if (!who) return alert("“Fait par” obligatoire.");
+    const who = currentUserName(); // ✅ auto
+    if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     try {
       const u = auth.currentUser;
@@ -791,8 +808,8 @@ export default function RepairTimelineModal({
     if ((actionType || "").trim() !== "reparer") return alert("Pas le bon chemin.");
     if (!stepPretDone) return alert("Faut d’abord faire “Prêt à l’emploi”.");
 
-    const who = (doneBy || "").toString().trim();
-    if (!who) return alert("“Fait par” obligatoire.");
+    const who = currentUserName(); // ✅ auto
+    if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     const ok = window.confirm("Confirmer: remis dans le trailer ?");
     if (!ok) return;
@@ -808,23 +825,21 @@ export default function RepairTimelineModal({
     }
   }
 
-  const adminActionLabel =
-    ((r?.adminActionType || "") + "").trim() === "reparer"
-      ? "Aller le faire réparer"
-      : ((r?.adminActionType || "") + "").trim() === "styro"
-      ? "Envoyer à Styro"
-      : "—";
-
   // ✅ return null seulement après hooks
   if (!visible) return null;
   if (typeof document === "undefined") return null;
 
+  // Styles rappel
+  const warnOrange = { background: "rgba(249,115,22,0.14)", border: "1px solid rgba(249,115,22,0.25)" };
+  const inRepairYellow = { background: "rgba(250,204,21,0.16)", border: "1px solid rgba(250,204,21,0.28)" };
+
+  // Condition "orange" (dans le MODAL) : après Reçu, avant En réparation
+  const needRepairConfirmNow = isAdmin && actionType === "styro" && stepStyroRecuDone && !stepStyroMiseReparationDone;
+
   const modal = (
     <div className="pt-modalOverlay" onMouseDown={onClose}>
-      {/* ✅ plus gros: enlever pt-modalSmall */}
       <div className="pt-modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="pt-modalHead">
-          {/* ✅ titre = tableau */}
           <div className="pt-modalTitle">Tableau — {tableauNom}</div>
           <button className="pt-modalClose" type="button" onClick={onClose}>
             ✕
@@ -837,7 +852,7 @@ export default function RepairTimelineModal({
 
           <TimelineHorizontal />
 
-          {/* ÉTAPE 1 — ADMIN DÉCISION */}
+          {/* ÉTAPE 2 — ADMIN DÉCISION (seulement si pas encore décidé) */}
           {!stepAdminDecisionDone && isAdmin && status === "brise" ? (
             <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
               <div className="pt-modalLabel">Étape 2 — Décision admin</div>
@@ -883,45 +898,25 @@ export default function RepairTimelineModal({
             </div>
           ) : null}
 
-          {stepAdminDecisionDone ? (
-            <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-              <div className="pt-modalLabel">Décision admin</div>
-              <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>
-                {adminActionLabel}
-                {(r?.adminActionPo || "").toString().trim() ? (
-                  <span>
-                    {" "}
-                    — PO: <b>{(r?.adminActionPo || "").toString().trim()}</b>
-                  </span>
-                ) : null}
-              </div>
-              <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 850, opacity: 0.85 }}>
-                Note: <b>{(r?.adminActionNote || "").toString().trim() || "—"}</b>
-              </div>
-            </div>
-          ) : null}
+          {/* ✅ IMPORTANT: ON A ENLEVÉ LE BLOC "Décision admin (Étape 2)" ICI
+              parce que l'info est déjà visible dans la timeline à l'étape 2. */}
 
           {/* CHEMIN STYRO */}
           {stepAdminDecisionDone && actionType === "styro" ? (
             <>
               {!isAdmin && !stepToStyroDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 2 — Envoyé à Styro</div>
+                  <div className="pt-modalLabel">Étape 3 — Envoyé à Styro</div>
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input
-                      className="pt-input"
-                      value={doneBy}
-                      onChange={(e) => setDoneBy(e.target.value)}
-                      placeholder="ex: Jo / Phil"
-                    />
+                    <div className="pt-modalLabel">Fait par</div>
+                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
                   </div>
                 </div>
               ) : null}
 
               {isAdmin && stepToStyroDone && !stepStyroRecuDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 3 — Reçu</div>
+                  <div className="pt-modalLabel">Étape 4 — Reçu</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Note (optionnel)</div>
                     <input
@@ -931,28 +926,45 @@ export default function RepairTimelineModal({
                       placeholder="ex: reçu au bureau"
                     />
                   </div>
+                  <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 850, opacity: 0.75 }}>
+                    Après confirmation, la case dans le tableau “Brisé” devient orange (rappel: mettre en réparation).
+                  </div>
                 </div>
               ) : null}
 
-              {isAdmin && stepStyroRecuDone && !stepStyroMiseReparationDone ? (
-                <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 4 — Mis en réparation</div>
-                  <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 850, opacity: 0.75 }}>
+              {needRepairConfirmNow ? (
+                <div className="pt-modalBlock" style={{ marginTop: 14, ...warnOrange }}>
+                  <div className="pt-modalLabel">Étape 5 — Mettre en réparation</div>
+                  <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 900, opacity: 0.9 }}>
+                    ⚠️ Tant que tu n’as pas confirmé, la case reste ORANGE dans le tableau “Brisé”.
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12.5, fontWeight: 850, opacity: 0.8 }}>
                     Quand tu confirmes, la ligne passe dans “En réparation”.
                   </div>
                 </div>
               ) : null}
 
               {isAdmin && stepStyroMiseReparationDone && !stepStyroRenvoyeDone ? (
-                <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 5 — Renvoyé</div>
+                <div className="pt-modalBlock" style={{ marginTop: 14, ...inRepairYellow }}>
+                  <div className="pt-modalLabel">Étape 6 — Renvoyé</div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <div className="pt-modalLabel">Renvoyé à (obligatoire)</div>
+                    <input
+                      className="pt-input"
+                      value={styroRenvoyeTo}
+                      onChange={(e) => setStyroRenvoyeTo(e.target.value)}
+                      placeholder="ex: Jo / Phil / Trailer 3"
+                    />
+                  </div>
+
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Note (optionnel)</div>
                     <input
                       className="pt-input"
                       value={styroRenvoyeNote}
                       onChange={(e) => setStyroRenvoyeNote(e.target.value)}
-                      placeholder="ex: renvoyé au trailer / à Jo"
+                      placeholder="ex: renvoyé au trailer / au bureau"
                     />
                   </div>
                 </div>
@@ -960,15 +972,10 @@ export default function RepairTimelineModal({
 
               {!isAdmin && stepStyroRenvoyeDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 6 — Reçu et remis dans le trailer</div>
+                  <div className="pt-modalLabel">Étape 7 — Reçu et remis dans le trailer</div>
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input
-                      className="pt-input"
-                      value={doneBy}
-                      onChange={(e) => setDoneBy(e.target.value)}
-                      placeholder="ex: Jo / Phil"
-                    />
+                    <div className="pt-modalLabel">Fait par</div>
+                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
                   </div>
                 </div>
               ) : null}
@@ -980,7 +987,7 @@ export default function RepairTimelineModal({
             <>
               {!isAdmin && !stepPorteDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 2 — Je l’ai porté à…</div>
+                  <div className="pt-modalLabel">Étape 3 — Je l’ai porté à…</div>
 
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Porté à (obligatoire)</div>
@@ -993,13 +1000,8 @@ export default function RepairTimelineModal({
                   </div>
 
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input
-                      className="pt-input"
-                      value={doneBy}
-                      onChange={(e) => setDoneBy(e.target.value)}
-                      placeholder="ex: Jo / Phil"
-                    />
+                    <div className="pt-modalLabel">Fait par</div>
+                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
                   </div>
 
                   <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 850, opacity: 0.75 }}>
@@ -1010,45 +1012,30 @@ export default function RepairTimelineModal({
 
               {!isAdmin && stepPorteDone && !stepChercheDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 3 — Je l’ai été le chercher</div>
+                  <div className="pt-modalLabel">Étape 4 — Je l’ai été le chercher</div>
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input
-                      className="pt-input"
-                      value={doneBy}
-                      onChange={(e) => setDoneBy(e.target.value)}
-                      placeholder="ex: Jo / Phil"
-                    />
+                    <div className="pt-modalLabel">Fait par</div>
+                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
                   </div>
                 </div>
               ) : null}
 
               {!isAdmin && stepChercheDone && !stepPretDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 4 — Prêt à l’emploi</div>
+                  <div className="pt-modalLabel">Étape 5 — Prêt à l’emploi</div>
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input
-                      className="pt-input"
-                      value={doneBy}
-                      onChange={(e) => setDoneBy(e.target.value)}
-                      placeholder="ex: Jo / Phil"
-                    />
+                    <div className="pt-modalLabel">Fait par</div>
+                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
                   </div>
                 </div>
               ) : null}
 
               {!isAdmin && stepPretDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 5 — Remis dans le trailer</div>
+                  <div className="pt-modalLabel">Étape 6 — Remis dans le trailer</div>
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par (obligatoire)</div>
-                    <input
-                      className="pt-input"
-                      value={doneBy}
-                      onChange={(e) => setDoneBy(e.target.value)}
-                      placeholder="ex: Jo / Phil"
-                    />
+                    <div className="pt-modalLabel">Fait par</div>
+                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
                   </div>
                 </div>
               ) : null}
@@ -1059,7 +1046,7 @@ export default function RepairTimelineModal({
         <div className="pt-modalFoot">
           {!stepAdminDecisionDone && isAdmin && status === "brise" ? (
             <button className="pt-btn" type="button" onClick={adminConfirmDecision}>
-              Confirmer décision admin
+              Confirmer décision (Étape 2)
             </button>
           ) : null}
 
@@ -1067,31 +1054,31 @@ export default function RepairTimelineModal({
             <>
               {!isAdmin && !stepToStyroDone ? (
                 <button className="pt-btn" type="button" onClick={userConfirmSentToStyro}>
-                  Confirmer: Envoyé à Styro
+                  Confirmer: Envoyé à Styro (Étape 3)
                 </button>
               ) : null}
 
               {isAdmin && stepToStyroDone && !stepStyroRecuDone ? (
                 <button className="pt-btn" type="button" onClick={adminMarkStyroRecu}>
-                  Confirmer: Reçu
+                  Confirmer: Reçu (Étape 4)
                 </button>
               ) : null}
 
               {isAdmin && stepStyroRecuDone && !stepStyroMiseReparationDone ? (
                 <button className="pt-btn" type="button" onClick={adminMarkStyroMiseReparation}>
-                  Confirmer: Mis en réparation
+                  Confirmer: En réparation (Étape 5)
                 </button>
               ) : null}
 
               {isAdmin && stepStyroMiseReparationDone && !stepStyroRenvoyeDone ? (
                 <button className="pt-btn" type="button" onClick={adminMarkStyroRenvoye}>
-                  Confirmer: Renvoyé
+                  Confirmer: Renvoyé (Étape 6)
                 </button>
               ) : null}
 
               {!isAdmin && stepStyroRenvoyeDone ? (
                 <button className="pt-btn" type="button" onClick={userConfirmStyroReceivedAndReturned}>
-                  Confirmer: Reçu & remis trailer
+                  Confirmer: Reçu & remis trailer (Étape 7)
                 </button>
               ) : null}
             </>
@@ -1101,25 +1088,25 @@ export default function RepairTimelineModal({
             <>
               {!isAdmin && !stepPorteDone ? (
                 <button className="pt-btn" type="button" onClick={userConfirmPorteA}>
-                  Confirmer: Porté à…
+                  Confirmer: Porté à… (Étape 3)
                 </button>
               ) : null}
 
               {!isAdmin && stepPorteDone && !stepChercheDone ? (
                 <button className="pt-btn" type="button" onClick={userConfirmCherche}>
-                  Confirmer: Été le chercher
+                  Confirmer: Été le chercher (Étape 4)
                 </button>
               ) : null}
 
               {!isAdmin && stepChercheDone && !stepPretDone ? (
                 <button className="pt-btn" type="button" onClick={userConfirmPret}>
-                  Confirmer: Prêt à l’emploi
+                  Confirmer: Prêt à l’emploi (Étape 5)
                 </button>
               ) : null}
 
               {!isAdmin && stepPretDone ? (
                 <button className="pt-btn" type="button" onClick={userReturnToTrailerAfterPret}>
-                  Confirmer: Remis dans le trailer
+                  Confirmer: Remis dans le trailer (Étape 6)
                 </button>
               ) : null}
             </>
@@ -1133,6 +1120,5 @@ export default function RepairTimelineModal({
     </div>
   );
 
-  // ✅ PORTAL => plus jamais coincé sous un sticky header
   return createPortal(modal, document.body);
 }
