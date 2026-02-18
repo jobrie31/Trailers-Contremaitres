@@ -949,16 +949,6 @@ export default function RepairTimelineModal({
                   <div className="pt-modalLabel">Étape 6 — Renvoyé</div>
 
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Renvoyé à (obligatoire)</div>
-                    <input
-                      className="pt-input"
-                      value={styroRenvoyeTo}
-                      onChange={(e) => setStyroRenvoyeTo(e.target.value)}
-                      placeholder="ex: Jo / Phil / Trailer 3"
-                    />
-                  </div>
-
-                  <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Note (optionnel)</div>
                     <input
                       className="pt-input"
