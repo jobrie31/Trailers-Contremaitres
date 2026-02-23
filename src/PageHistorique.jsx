@@ -20,7 +20,12 @@ function pad2(n) {
 function fmtDateTimeFR(ts) {
   if (!ts) return "—";
   try {
-    const d = typeof ts?.toDate === "function" ? ts.toDate() : ts instanceof Date ? ts : null;
+    const d =
+      typeof ts?.toDate === "function"
+        ? ts.toDate()
+        : ts instanceof Date
+        ? ts
+        : null;
     if (!d) return "—";
     const dd = pad2(d.getDate());
     const mm = pad2(d.getMonth() + 1);
@@ -75,7 +80,7 @@ export default function PageHistorique() {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Modal (détails d’un article)
+  // Modal (détails d’un équipement)
   const [open, setOpen] = useState(false);
   const [activeTrackId, setActiveTrackId] = useState(null);
   const [activeHeader, setActiveHeader] = useState(null);
@@ -87,8 +92,13 @@ export default function PageHistorique() {
   useEffect(() => {
     setLoading(true);
 
-    // On charge les derniers logs (ex: 500) puis on groupe côté client en "1 ligne par article"
-    const q = query(collection(db, "reparations_history"), orderBy("ts", "desc"), limit(500));
+    // Derniers logs -> on groupe côté client pour faire 1 ligne par trackId
+    const q = query(
+      collection(db, "reparations_history"),
+      orderBy("ts", "desc"),
+      limit(800) // un peu plus large pour mieux couvrir
+    );
+
     return onSnapshot(
       q,
       (snap) => {
@@ -102,15 +112,31 @@ export default function PageHistorique() {
     );
   }, []);
 
-  // 1 ligne par trackId => on garde le log le plus récent de chaque trackId
+  // ✅ 1 ligne par trackId (on prend le log le plus récent)
+  // + on calcule un petit "eventsCountApprox" basé sur les logs chargés (pas la timeline complète)
   const rows = useMemo(() => {
-    const map = new Map(); // trackId => latest log
+    const latestByTid = new Map(); // trackId => latest log
+    const countByTid = new Map(); // trackId => nb d'évènements dans le batch chargé
+
     for (const l of logs) {
       const tid = (l.trackId || "").toString().trim();
       if (!tid) continue;
-      if (!map.has(tid)) map.set(tid, l);
+
+      countByTid.set(tid, (countByTid.get(tid) || 0) + 1);
+
+      // logs est trié desc => le premier rencontré = le plus récent
+      if (!latestByTid.has(tid)) latestByTid.set(tid, l);
     }
-    return Array.from(map.values());
+
+    const arr = Array.from(latestByTid.values()).map((l) => {
+      const tid = (l.trackId || "").toString().trim();
+      return {
+        ...l,
+        _eventsCountApprox: countByTid.get(tid) || 1,
+      };
+    });
+
+    return arr;
   }, [logs]);
 
   function openTimeline(latestLog) {
@@ -123,6 +149,9 @@ export default function PageHistorique() {
       trailerNom: latestLog?.trailerNom || "—",
       qty: latestLog?.qty ?? null,
       status: latestLog?.status || null,
+      lastTs: latestLog?.ts || null,
+      lastEvent: latestLog?.event || null,
+      trackId: tid,
     });
 
     setOpen(true);
@@ -177,21 +206,19 @@ export default function PageHistorique() {
     try {
       setDeletingTrackId(tid);
 
-      // On récupère tous les docs qui matchent ce trackId
-      const q = query(collection(db, "reparations_history"), where("trackId", "==", tid));
+      const q = query(
+        collection(db, "reparations_history"),
+        where("trackId", "==", tid)
+      );
       const snap = await getDocs(q);
-
       if (snap.empty) return;
 
-      // Batch delete (max 500 ops / batch)
       const docs = snap.docs;
-      const BATCH_SIZE = 450; // marge de sécurité
+      const BATCH_SIZE = 450; // marge sécurité
       for (let i = 0; i < docs.length; i += BATCH_SIZE) {
         const batch = writeBatch(db);
         const chunk = docs.slice(i, i + BATCH_SIZE);
-        for (const d of chunk) {
-          batch.delete(doc(db, "reparations_history", d.id));
-        }
+        for (const d of chunk) batch.delete(doc(db, "reparations_history", d.id));
         await batch.commit();
       }
     } catch (e) {
@@ -204,30 +231,35 @@ export default function PageHistorique() {
 
   return (
     <div style={{ padding: 16 }}>
-      <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>Historique</div>
+      <div style={{ fontSize: 20, fontWeight: 900, marginBottom: 12 }}>
+        Historique (1 ligne par équipement)
+      </div>
 
       {loading ? (
         <div style={{ opacity: 0.75 }}>Chargement…</div>
       ) : rows.length === 0 ? (
         <div style={{ opacity: 0.75 }}>Aucun historique pour l’instant.</div>
       ) : (
-        <div className="pt-card" style={{ background: "#fff", borderRadius: 12, padding: 12 }}>
+        <div
+          className="pt-card"
+          style={{ background: "#fff", borderRadius: 12, padding: 12 }}
+        >
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2.2fr 1.2fr 0.7fr 1fr 1.1fr 44px",
+              gridTemplateColumns: "2.2fr 1.2fr 0.7fr 1fr 1.2fr 44px",
               gap: 10,
               padding: "8px 10px",
               fontWeight: 900,
               borderBottom: "1px solid #eee",
             }}
           >
-            <div>Article</div>
+            <div>Équipement</div>
             <div>Trailer</div>
             <div>Qté</div>
             <div>Statut</div>
             <div>Dernière action</div>
-            <div style={{ textAlign: "right" }}> </div>
+            <div style={{ textAlign: "right" }} />
           </div>
 
           {rows.map((r) => {
@@ -243,64 +275,66 @@ export default function PageHistorique() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") openTimeline(r);
                 }}
+                title="Clique pour voir tous les avancements"
                 style={{
-                  width: "100%",
-                  textAlign: "left",
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
+                  display: "grid",
+                  gridTemplateColumns: "2.2fr 1.2fr 0.7fr 1fr 1.2fr 44px",
+                  gap: 10,
+                  padding: "10px 10px",
+                  borderBottom: "1px solid #f3f3f3",
+                  alignItems: "center",
                   cursor: "pointer",
+                  borderRadius: 10,
                   outline: "none",
                 }}
-                title="Clique pour voir toute l’historique"
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(0,0,0,0.03)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                }}
               >
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "2.2fr 1.2fr 0.7fr 1fr 1.1fr 44px",
-                    gap: 10,
-                    padding: "10px 10px",
-                    borderBottom: "1px solid #f3f3f3",
-                    alignItems: "center",
-                  }}
-                >
-                  <div style={{ fontWeight: 800 }}>
-                    {r.nom || "—"}
-                    <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
-                      {fmtDateTimeFR(r.ts)} — ID: {(tid || "").toString().slice(0, 8)}…
-                    </div>
+                <div style={{ fontWeight: 900 }}>
+                  {r.nom || "—"}
+                  <div style={{ fontSize: 12, opacity: 0.7, marginTop: 2 }}>
+                    {fmtDateTimeFR(r.ts)} — ID: {tid.slice(0, 8)}… — env.{" "}
+                    {r._eventsCountApprox} évènement(s)
                   </div>
+                </div>
 
-                  <div style={{ fontWeight: 700 }}>{r.trailerNom || "—"}</div>
-                  <div style={{ fontWeight: 700 }}>{Number(r.qty || 0) || "—"}</div>
-                  <div style={{ fontWeight: 700 }}>{statusLabel(r.status)}</div>
-                  <div style={{ fontWeight: 700 }}>{eventLabel(r.event)}</div>
+                <div style={{ fontWeight: 800 }}>{r.trailerNom || "—"}</div>
+                <div style={{ fontWeight: 800 }}>
+                  {r.qty != null ? Number(r.qty || 0) : "—"}
+                </div>
+                <div style={{ fontWeight: 800 }}>{statusLabel(r.status)}</div>
+                <div style={{ fontWeight: 800 }}>{eventLabel(r.event)}</div>
 
-                  {/* ✅ X supprimer (ne doit pas ouvrir le popup) */}
-                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        deleteTrackHistory(tid);
-                      }}
-                      disabled={isDeleting}
-                      title="Supprimer cette ligne d’historique"
-                      style={{
-                        width: 34,
-                        height: 30,
-                        borderRadius: 10,
-                        border: "1px solid rgba(239,68,68,0.25)",
-                        background: isDeleting ? "rgba(239,68,68,0.08)" : "rgba(239,68,68,0.12)",
-                        cursor: isDeleting ? "not-allowed" : "pointer",
-                        fontWeight: 900,
-                        lineHeight: "28px",
-                      }}
-                    >
-                      {isDeleting ? "…" : "✕"}
-                    </button>
-                  </div>
+                {/* ✅ X supprimer (ne doit pas ouvrir le popup) */}
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      deleteTrackHistory(tid);
+                    }}
+                    disabled={isDeleting}
+                    title="Supprimer cette ligne d’historique"
+                    style={{
+                      width: 34,
+                      height: 30,
+                      borderRadius: 10,
+                      border: "1px solid rgba(239,68,68,0.25)",
+                      background: isDeleting
+                        ? "rgba(239,68,68,0.08)"
+                        : "rgba(239,68,68,0.12)",
+                      cursor: isDeleting ? "not-allowed" : "pointer",
+                      fontWeight: 900,
+                      lineHeight: "28px",
+                    }}
+                  >
+                    {isDeleting ? "…" : "✕"}
+                  </button>
                 </div>
               </div>
             );
@@ -311,16 +345,29 @@ export default function PageHistorique() {
       {/* Modal timeline */}
       {open && (
         <div className="pt-modalOverlay" onMouseDown={closeModal}>
-          <div className="pt-modal" style={{ maxWidth: 760 }} onMouseDown={(e) => e.stopPropagation()}>
+          <div
+            className="pt-modal"
+            style={{ maxWidth: 820 }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             <div className="pt-modalHead">
-              <div className="pt-modalTitle">Historique — {activeHeader?.nom || "—"}</div>
+              <div className="pt-modalTitle">
+                Avancements — {activeHeader?.nom || "—"}
+              </div>
               <button className="pt-modalClose" type="button" onClick={closeModal}>
                 ✕
               </button>
             </div>
 
             <div className="pt-modalBody">
-              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+              <div
+                style={{
+                  display: "flex",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  marginBottom: 12,
+                }}
+              >
                 <span className="pr-miniPill">
                   Trailer: <b>{activeHeader?.trailerNom || "—"}</b>
                 </span>
@@ -330,6 +377,12 @@ export default function PageHistorique() {
                 <span className="pr-miniPill">
                   Statut: <b>{statusLabel(activeHeader?.status)}</b>
                 </span>
+                <span className="pr-miniPill">
+                  Dernière action: <b>{eventLabel(activeHeader?.lastEvent)}</b>
+                </span>
+                <span className="pr-miniPill">
+                  ID: <b>{activeHeader?.trackId?.slice(0, 12)}…</b>
+                </span>
               </div>
 
               {timelineLoading ? (
@@ -338,61 +391,84 @@ export default function PageHistorique() {
                 <div style={{ opacity: 0.75 }}>Aucun événement.</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {timeline.map((t) => (
-                    <div
-                      key={t.id}
-                      style={{
-                        border: "1px solid #eee",
-                        borderRadius: 12,
-                        padding: 10,
-                        background: (t.event || "") === "SUIVI" ? "rgba(245, 158, 11, 0.12)" : "white",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <div style={{ fontWeight: 900 }}>{eventLabel(t.event)}</div>
-                        <div style={{ opacity: 0.75, fontWeight: 700 }}>{fmtDateTimeFR(t.ts)}</div>
+                  {timeline.map((t, idx) => {
+                    const isFollow = (t.event || "") === "SUIVI";
+                    return (
+                      <div
+                        key={t.id}
+                        style={{
+                          border: "1px solid #eee",
+                          borderRadius: 12,
+                          padding: 10,
+                          background: isFollow ? "rgba(245, 158, 11, 0.12)" : "white",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            alignItems: "baseline",
+                          }}
+                        >
+                          <div style={{ fontWeight: 950 }}>
+                            #{idx + 1} — {eventLabel(t.event)}
+                          </div>
+                          <div style={{ opacity: 0.75, fontWeight: 800 }}>
+                            {fmtDateTimeFR(t.ts)}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            marginTop: 6,
+                            display: "flex",
+                            gap: 10,
+                            flexWrap: "wrap",
+                            fontSize: 13,
+                          }}
+                        >
+                          <span>
+                            Statut: <b>{statusLabel(t.status)}</b>
+                          </span>
+                          {t.qty != null ? (
+                            <span>
+                              Qté: <b>{Number(t.qty || 0)}</b>
+                            </span>
+                          ) : null}
+                          {t.po ? (
+                            <span>
+                              PO: <b>{t.po}</b>
+                            </span>
+                          ) : null}
+                          {t.endroit ? (
+                            <span>
+                              Endroit: <b>{t.endroit}</b>
+                            </span>
+                          ) : null}
+                        </div>
+
+                        {t.note ? (
+                          <div style={{ marginTop: 6, fontSize: 13 }}>
+                            Note: <b>{t.note}</b>
+                          </div>
+                        ) : null}
+
+                        {t.followUpText ? (
+                          <div style={{ marginTop: 6, fontSize: 13 }}>
+                            Suivi:{" "}
+                            <b style={{ whiteSpace: "pre-wrap" }}>{t.followUpText}</b>
+                          </div>
+                        ) : null}
+
+                        {t.extra ? (
+                          <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+                            Détails: <code>{JSON.stringify(t.extra)}</code>
+                          </div>
+                        ) : null}
                       </div>
-
-                      <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", fontSize: 13 }}>
-                        <span>
-                          Statut: <b>{statusLabel(t.status)}</b>
-                        </span>
-                        {t.qty != null ? (
-                          <span>
-                            Qté: <b>{Number(t.qty || 0)}</b>
-                          </span>
-                        ) : null}
-                        {t.po ? (
-                          <span>
-                            PO: <b>{t.po}</b>
-                          </span>
-                        ) : null}
-                        {t.endroit ? (
-                          <span>
-                            Endroit: <b>{t.endroit}</b>
-                          </span>
-                        ) : null}
-                      </div>
-
-                      {t.note ? (
-                        <div style={{ marginTop: 6, fontSize: 13 }}>
-                          Note: <b>{t.note}</b>
-                        </div>
-                      ) : null}
-
-                      {t.followUpText ? (
-                        <div style={{ marginTop: 6, fontSize: 13 }}>
-                          Suivi: <b style={{ whiteSpace: "pre-wrap" }}>{t.followUpText}</b>
-                        </div>
-                      ) : null}
-
-                      {t.extra ? (
-                        <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
-                          Détails: <code>{JSON.stringify(t.extra)}</code>
-                        </div>
-                      ) : null}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
