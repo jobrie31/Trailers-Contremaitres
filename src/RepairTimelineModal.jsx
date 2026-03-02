@@ -11,21 +11,23 @@ import { doc, updateDoc, serverTimestamp, runTransaction, collection } from "fir
  *   1) Brisé (créé dans le tableau "Brisé")
  *   2) Décision admin
  *   3) Non-admin: "Envoyé à Styro" (fait par = user actuel)
- *   4) Admin: "Reçu" (note optionnelle)  -> met un flag pour rendre la case ORANGE dans "Brisé"
- *   5) Admin: "Mis en réparation" (passe status="reparation", retire le flag ORANGE)
- *   6) Admin: "Renvoyé à ..." (à + note optionnelle) (reste dans "En réparation")
+ *   4) Admin: "Reçu" (note optionnelle) -> met needsAdminRepairConfirm=true (ORANGE dans "Brisé")
+ *   5) Admin: "Mis en réparation" (passe status="reparation")
+ *   6) Admin: "Renvoyé" (NOTE optionnelle seulement)  ✅ "Renvoyé à ..." ENLEVÉ COMPLET
  *   7) Non-admin: "Reçu et remis dans le trailer" => retour qty + delete doc
  *
  * B) adminActionType="reparer"
  *   1) Brisé
- *   2) Décision admin
- *   3) Non-admin: "Je l'ai porté à ..." (fait par = user actuel) -> status "reparation"
- *   4) Non-admin: "Je l'ai été le chercher"
- *   5) Non-admin: "Prêt à l'emploi"
- *   6) Non-admin: "Remis dans le trailer" => retour qty + delete doc
+ *   2) Décision admin (Endroit obligatoire + Note optionnel)
+ *   3) Non-admin: "Porté" (note optionnel) -> status "reparation"
+ *   4) Non-admin: "Aller le chercher & remis trailer" (1 bouton) => retour qty + delete doc
  *
  * NOTE:
- * - needsAdminRepairConfirm: true/false => à utiliser dans le tableau "Brisé" pour colorer la case ORANGE.
+ * - needsAdminRepairConfirm: true/false => utilisé dans le tableau "Brisé" pour colorer ORANGE.
+ * - Nouveaux champs optionnels utilisés ici:
+ *   - porterNote (note du worker étape 3)
+ *   - pickupNote (note du worker étape 4)
+ *   - remisTrailerAt / remisTrailerByUid / remisTrailerByName
  */
 
 export default function RepairTimelineModal({
@@ -127,13 +129,14 @@ export default function RepairTimelineModal({
   // ---------- forms ----------
   const [adminChoice, setAdminChoice] = useState(""); // "" | "styro" | "reparer"
   const [adminPo, setAdminPo] = useState("");
-  const [adminNote, setAdminNote] = useState("");
-
-  const [porterWhere, setPorterWhere] = useState("");
+  const [adminEndroit, setAdminEndroit] = useState(""); // ✅ NEW (Endroit obligatoire si reparer)
+  const [adminNoteOpt, setAdminNoteOpt] = useState(""); // ✅ NEW note optionnel
 
   const [styroRecuNote, setStyroRecuNote] = useState("");
-  const [styroRenvoyeTo, setStyroRenvoyeTo] = useState("");
   const [styroRenvoyeNote, setStyroRenvoyeNote] = useState("");
+
+  const [workerPorterNote, setWorkerPorterNote] = useState(""); // ✅ NEW: étape 3 reparer note optionnel
+  const [workerPickupNote, setWorkerPickupNote] = useState(""); // ✅ NEW: étape 4 (pickup+return) note optionnel
 
   useEffect(() => {
     if (!visible) return;
@@ -142,17 +145,20 @@ export default function RepairTimelineModal({
     setAdminChoice(existing === "styro" || existing === "reparer" ? existing : "");
 
     setAdminPo((r?.adminActionPo || "").toString());
-    setAdminNote((r?.adminActionNote || "").toString());
 
-    setPorterWhere((r?.porterWhere || "").toString());
+    // ✅ on mappe: endroit = porterWhere, note optionnel = adminActionNote
+    setAdminEndroit((r?.porterWhere || "").toString());
+    setAdminNoteOpt((r?.adminActionNote || "").toString());
 
     setStyroRecuNote((r?.styroRecuNote || "").toString());
-    setStyroRenvoyeTo((r?.styroRenvoyeTo || "").toString());
     setStyroRenvoyeNote((r?.styroRenvoyeNote || "").toString());
+
+    setWorkerPorterNote("");
+    setWorkerPickupNote("");
   }, [visible, r]);
 
   // ---------- step booleans ----------
-  const stepBriseDone = true; // la ligne existe => l'objet est "brisé" (étape 1)
+  const stepBriseDone = true;
   const stepAdminDecisionDone = !!r?.adminActionAt;
 
   // Path styro:
@@ -161,15 +167,14 @@ export default function RepairTimelineModal({
   const stepStyroMiseReparationDone = !!r?.styroMiseReparationAt;
   const stepStyroRenvoyeDone = !!r?.styroRenvoyeAt;
 
-  // Path reparer:
+  // Path reparer (NOUVEAU FLOW):
   const stepPorteDone = !!r?.porterAt;
+  const stepPickupReturnDone = !!r?.remisTrailerAt; // ✅ NEW: 1 seul bouton
+  // (compat anciens champs si déjà présents)
   const stepChercheDone = !!r?.chercherAt;
   const stepPretDone = !!r?.pretAt;
 
   // ---------- steps ----------
-  // Step 1 = Brisé
-  // Step 2 = Décision admin
-  // Step 3 = Envoyé (styro) OU Porté (reparer)
   const steps = useMemo(() => {
     if (!stepAdminDecisionDone) {
       return [
@@ -192,13 +197,12 @@ export default function RepairTimelineModal({
       ];
     }
 
+    // ✅ Nouveau flow reparer: 4 étapes principales
     return [
       { key: "brise", labelShort: "Brisé", done: stepBriseDone },
       { key: "decide", labelShort: "Décision", done: true },
       { key: "porte", labelShort: "Porté", done: stepPorteDone },
-      { key: "cherche", labelShort: "Cherché", done: stepChercheDone },
-      { key: "pret", labelShort: "Prêt", done: stepPretDone },
-      { key: "retour", labelShort: "Remis trailer", done: false },
+      { key: "pickupreturn", labelShort: "Cherché & remis", done: stepPickupReturnDone },
     ];
   }, [
     stepAdminDecisionDone,
@@ -210,14 +214,20 @@ export default function RepairTimelineModal({
     stepStyroMiseReparationDone,
     stepStyroRenvoyeDone,
     stepPorteDone,
-    stepChercheDone,
-    stepPretDone,
+    stepPickupReturnDone,
   ]);
 
   const activeIndex = useMemo(() => {
     const idx = steps.findIndex((s) => !s.done);
     return idx === -1 ? steps.length - 1 : idx;
   }, [steps]);
+
+  const repairSinceLabel = useMemo(() => {
+    const ts = r?.styroMiseReparationAt || r?.porterAt || r?.createdAt || null;
+    return fmtDateFR(ts);
+  }, [r]);
+
+  const repairWhereLabel = useMemo(() => ((r?.porterWhere || "").toString().trim() || "—"), [r]);
 
   const stepInfo = useMemo(() => {
     const path = (stepAdminDecisionDone ? actionType : "") || "";
@@ -240,7 +250,11 @@ export default function RepairTimelineModal({
             ? "Aller le faire réparer"
             : "—"
         }`,
-        (r?.adminActionPo || "").toString().trim() ? `PO: ${(r?.adminActionPo || "").toString().trim()}` : null,
+        ((r?.adminActionPo || "").toString().trim() ? `PO: ${(r?.adminActionPo || "").toString().trim()}` : null),
+        // ✅ pour reparer: Endroit obligatoire
+        ((r?.adminActionType || "") + "").trim() === "reparer"
+          ? `Endroit: ${(r?.porterWhere || "").toString().trim() || "—"}`
+          : null,
         `Note: ${(r?.adminActionNote || "").toString().trim() || "—"}`,
       ].filter(Boolean),
     };
@@ -263,16 +277,14 @@ export default function RepairTimelineModal({
       if (stepStyroMiseReparationDone) {
         infos.mise = {
           when: fmtDateTimeFR(r?.styroMiseReparationAt),
-          lines: ["Statut: En réparation"],
+          lines: [`Statut: En réparation (depuis ${repairSinceLabel})`],
         };
       }
       if (stepStyroRenvoyeDone) {
-        const to = (r?.styroRenvoyeTo || "").toString().trim() || "—";
         const when = fmtDateTimeFR(r?.styroRenvoyeAt);
         infos.renvoye = {
           when,
           lines: [
-            `Renvoyé à: ${to} (${when})`,
             (r?.styroRenvoyeNote || "").toString().trim()
               ? `Note: ${(r?.styroRenvoyeNote || "").toString().trim()}`
               : null,
@@ -284,22 +296,34 @@ export default function RepairTimelineModal({
         infos.porte = {
           when: fmtDateTimeFR(r?.porterAt),
           lines: [
-            `Porté à: ${(r?.porterWhere || "").toString().trim() || "—"}`,
+            `Endroit: ${(r?.porterWhere || "").toString().trim() || "—"}`,
             `Fait par: ${(r?.porterByName || "").toString().trim() || "—"}`,
-          ],
+            (r?.porterNote || "").toString().trim() ? `Note: ${(r?.porterNote || "").toString().trim()}` : null,
+          ].filter(Boolean),
         };
       }
-      if (stepChercheDone) {
-        infos.cherche = {
-          when: fmtDateTimeFR(r?.chercherAt),
-          lines: [`Fait par: ${(r?.chercherByName || "").toString().trim() || "—"}`],
+      if (stepPickupReturnDone) {
+        infos.pickupreturn = {
+          when: fmtDateTimeFR(r?.remisTrailerAt),
+          lines: [
+            `Fait par: ${(r?.remisTrailerByName || "").toString().trim() || "—"}`,
+            (r?.pickupNote || "").toString().trim() ? `Note: ${(r?.pickupNote || "").toString().trim()}` : null,
+          ].filter(Boolean),
         };
-      }
-      if (stepPretDone) {
-        infos.pret = {
-          when: fmtDateTimeFR(r?.pretAt),
-          lines: [`Fait par: ${(r?.pretByName || "").toString().trim() || "—"}`],
-        };
+      } else {
+        // compat affichage si anciens champs existent
+        if (stepChercheDone) {
+          infos.cherche = {
+            when: fmtDateTimeFR(r?.chercherAt),
+            lines: [`Fait par: ${(r?.chercherByName || "").toString().trim() || "—"}`],
+          };
+        }
+        if (stepPretDone) {
+          infos.pret = {
+            when: fmtDateTimeFR(r?.pretAt),
+            lines: [`Fait par: ${(r?.pretByName || "").toString().trim() || "—"}`],
+          };
+        }
       }
     }
 
@@ -313,8 +337,10 @@ export default function RepairTimelineModal({
     stepStyroMiseReparationDone,
     stepStyroRenvoyeDone,
     stepPorteDone,
+    stepPickupReturnDone,
     stepChercheDone,
     stepPretDone,
+    repairSinceLabel,
   ]);
 
   function TimelineHorizontal() {
@@ -358,7 +384,7 @@ export default function RepairTimelineModal({
                       opacity: done ? 0.9 : isActive ? 0.85 : 0.6,
                       textAlign: "center",
                       lineHeight: 1.05,
-                      maxWidth: 90,
+                      maxWidth: 110,
                     }}
                   >
                     {s.labelShort}
@@ -484,10 +510,16 @@ export default function RepairTimelineModal({
       return alert("Choisis: Envoyer à Styro OU Aller le faire réparer.");
     }
 
-    const note = (adminNote || "").toString().trim();
     const po = (adminPo || "").toString().trim();
 
-    if (!note) return alert("Note obligatoire.");
+    // ✅ REPARER: Endroit obligatoire (remplace note obligatoire)
+    const endroit = (adminEndroit || "").toString().trim();
+    if (adminChoice === "reparer" && !endroit) return alert("Endroit obligatoire.");
+
+    // ✅ Note optionnel (aucune obligation)
+    const noteOpt = (adminNoteOpt || "").toString().trim() || null;
+
+    // (PO: je le garde comme avant si tu l'utilises)
     if (adminChoice === "reparer" && !po) return alert("Numéro PO obligatoire si “Aller le faire réparer”.");
 
     try {
@@ -495,8 +527,14 @@ export default function RepairTimelineModal({
 
       await updateDoc(doc(db, "trailers", tId, "reparations", r.id), {
         adminActionType: adminChoice,
-        adminActionNote: note,
         adminActionPo: adminChoice === "reparer" ? po : null,
+
+        // ✅ adminActionNote = note optionnel
+        adminActionNote: noteOpt,
+
+        // ✅ endroit obligatoire stocké dans porterWhere
+        porterWhere: adminChoice === "reparer" ? endroit : (r?.porterWhere || null),
+
         adminActionAt: serverTimestamp(),
         adminActionByUid: u?.uid || null,
       });
@@ -509,9 +547,21 @@ export default function RepairTimelineModal({
         qty: Number(r?.qty || 0),
         status: status || "brise",
         equipementId: r?.equipementId || null,
-        note,
+        note: noteOpt,
         po: adminChoice === "reparer" ? po : null,
-        extra: { adminActionType: adminChoice },
+        extra: { adminActionType: adminChoice, endroit: adminChoice === "reparer" ? endroit : null },
+      });
+
+      // ✅ si c’est “reparer” => on veut que ça flash rouge au worker (notifications/turnInfo le gère via porterAt vide)
+      await notifOpenOrUpdate?.(r.id, {
+        targetRole: "admin", // si toi tu utilises "admin" uniquement, tu peux enlever. Sinon ignore.
+        done: false,
+        type: adminChoice === "reparer" ? "reparer_assigned" : "styro_assigned",
+        trailerId: tId,
+        trailerNom: tNom,
+        repId: r.id,
+        status: status || "brise",
+        nom: r?.nom || "—",
       });
 
       await notifDone?.(r.id, "admin_decision_done");
@@ -528,7 +578,7 @@ export default function RepairTimelineModal({
     if (!stepAdminDecisionDone) return alert("L’admin n’a pas encore décidé.");
     if ((actionType || "").trim() !== "styro") return alert("Cette ligne n’est pas en mode Styro.");
 
-    const who = currentUserName(); // ✅ auto
+    const who = currentUserName();
     if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     try {
@@ -571,7 +621,7 @@ export default function RepairTimelineModal({
         styroRecuAt: serverTimestamp(),
         styroRecuByUid: u?.uid || null,
         styroRecuNote: note,
-        needsAdminRepairConfirm: true, // ✅ ORANGE dans le tableau "Brisé"
+        needsAdminRepairConfirm: true,
       });
 
       await logHistory?.("STYRO_RECU", {
@@ -605,7 +655,7 @@ export default function RepairTimelineModal({
         styroMiseReparationAt: serverTimestamp(),
         styroMiseReparationByUid: u?.uid || null,
         status: "reparation",
-        needsAdminRepairConfirm: false, // ✅ enlève l'ORANGE
+        needsAdminRepairConfirm: false,
       });
 
       await logHistory?.("STYRO_MIS_REPARATION", {
@@ -631,9 +681,6 @@ export default function RepairTimelineModal({
     if ((actionType || "").trim() !== "styro") return alert("Pas le bon chemin.");
     if (!stepStyroMiseReparationDone) return alert("Admin doit d’abord faire “Mis en réparation”.");
 
-    const to = (styroRenvoyeTo || "").toString().trim();
-    if (!to) return alert("“Renvoyé à …” obligatoire.");
-
     try {
       const u = auth.currentUser;
       const note = (styroRenvoyeNote || "").toString().trim() || null;
@@ -641,8 +688,8 @@ export default function RepairTimelineModal({
       await updateDoc(doc(db, "trailers", tId, "reparations", r.id), {
         styroRenvoyeAt: serverTimestamp(),
         styroRenvoyeByUid: u?.uid || null,
-        styroRenvoyeTo: to,
         styroRenvoyeNote: note,
+        styroRenvoyeTo: null,
       });
 
       await logHistory?.("STYRO_RENVOYE", {
@@ -654,7 +701,6 @@ export default function RepairTimelineModal({
         status: "reparation",
         equipementId: r?.equipementId || null,
         note: note || null,
-        extra: { to },
       });
 
       await notifDone?.(r.id, "styro_renvoye_done");
@@ -671,7 +717,7 @@ export default function RepairTimelineModal({
     if ((actionType || "").trim() !== "styro") return alert("Pas le bon chemin.");
     if (!stepStyroRenvoyeDone) return alert("Admin doit d’abord faire “Renvoyé”.");
 
-    const who = currentUserName(); // ✅ auto
+    const who = currentUserName();
     if (!who || who === "—") return alert("Utilisateur non détecté.");
 
     const ok = window.confirm("Confirmer: reçu et remis dans le trailer ?");
@@ -688,17 +734,15 @@ export default function RepairTimelineModal({
     }
   }
 
-  async function userConfirmPorteA() {
+  // ✅ NEW: Étape 3 (worker) pour "reparer" = note optionnel seulement
+  async function userConfirmPorte() {
     if (isAdmin) return;
     if (!tId || !r?.id) return;
     if (!stepAdminDecisionDone) return alert("L’admin n’a pas encore décidé.");
-    if ((actionType || "").trim() !== "reparer") return alert("Cette ligne n’est pas en mode “Aller faire réparer”.");
+    if ((actionType || "").trim() !== "reparer") return alert("Cette ligne n’est pas en mode “Aller le faire réparer”.");
 
-    const who = currentUserName(); // ✅ auto
+    const who = currentUserName();
     if (!who || who === "—") return alert("Utilisateur non détecté.");
-
-    const where = (porterWhere || "").toString().trim();
-    if (!where) return alert("“Porté à …” obligatoire.");
 
     try {
       const u = auth.currentUser;
@@ -707,7 +751,7 @@ export default function RepairTimelineModal({
         porterAt: serverTimestamp(),
         porterByUid: u?.uid || null,
         porterByName: who,
-        porterWhere: where,
+        porterNote: (workerPorterNote || "").toString().trim() || null,
         status: "reparation",
       });
 
@@ -719,108 +763,62 @@ export default function RepairTimelineModal({
         qty: Number(r?.qty || 0),
         status: "reparation",
         equipementId: r?.equipementId || null,
-        extra: { who, where },
+        note: (workerPorterNote || "").toString().trim() || null,
+        extra: { who, endroit: repairWhereLabel },
       });
 
       onClose?.();
     } catch (e) {
-      console.error("userConfirmPorteA:", e);
+      console.error("userConfirmPorte:", e);
       alert("Erreur: " + (e?.message || "inconnue"));
     }
   }
 
-  async function userConfirmCherche() {
+  // ✅ NEW: Étape 4 (worker) = “Aller le chercher & remis trailer” (1 bouton) + delete doc
+  async function userPickupAndReturnToTrailer() {
     if (isAdmin) return;
     if (!tId || !r?.id) return;
     if ((actionType || "").trim() !== "reparer") return alert("Pas le bon chemin.");
-    if (!stepPorteDone) return alert("Faut d’abord faire “Je l’ai porté à …”.");
+    if (!stepPorteDone) return alert("Faut d’abord faire “Porté”.");
 
-    const who = currentUserName(); // ✅ auto
+    const who = currentUserName();
     if (!who || who === "—") return alert("Utilisateur non détecté.");
 
-    try {
-      const u = auth.currentUser;
-
-      await updateDoc(doc(db, "trailers", tId, "reparations", r.id), {
-        chercherAt: serverTimestamp(),
-        chercherByUid: u?.uid || null,
-        chercherByName: who,
-      });
-
-      await logHistory?.("CHERCHE_REPARATION", {
-        trailerId: tId,
-        trailerNom: tNom,
-        trackId: r.id,
-        nom: r?.nom || "—",
-        qty: Number(r?.qty || 0),
-        status: "reparation",
-        equipementId: r?.equipementId || null,
-        extra: { who },
-      });
-
-      onClose?.();
-    } catch (e) {
-      console.error("userConfirmCherche:", e);
-      alert("Erreur: " + (e?.message || "inconnue"));
-    }
-  }
-
-  async function userConfirmPret() {
-    if (isAdmin) return;
-    if (!tId || !r?.id) return;
-    if ((actionType || "").trim() !== "reparer") return alert("Pas le bon chemin.");
-    if (!stepChercheDone) return alert("Faut d’abord faire “Je l’ai été le chercher”.");
-
-    const who = currentUserName(); // ✅ auto
-    if (!who || who === "—") return alert("Utilisateur non détecté.");
-
-    try {
-      const u = auth.currentUser;
-
-      await updateDoc(doc(db, "trailers", tId, "reparations", r.id), {
-        pretAt: serverTimestamp(),
-        pretByUid: u?.uid || null,
-        pretByName: who,
-      });
-
-      await logHistory?.("PRET_EMPLOI", {
-        trailerId: tId,
-        trailerNom: tNom,
-        trackId: r.id,
-        nom: r?.nom || "—",
-        qty: Number(r?.qty || 0),
-        status: "reparation",
-        equipementId: r?.equipementId || null,
-        extra: { who },
-      });
-
-      await notifDone?.(r.id, "ready_done");
-      onClose?.();
-    } catch (e) {
-      console.error("userConfirmPret:", e);
-      alert("Erreur: " + (e?.message || "inconnue"));
-    }
-  }
-
-  async function userReturnToTrailerAfterPret() {
-    if (isAdmin) return;
-    if (!tId || !r?.id) return;
-    if ((actionType || "").trim() !== "reparer") return alert("Pas le bon chemin.");
-    if (!stepPretDone) return alert("Faut d’abord faire “Prêt à l’emploi”.");
-
-    const who = currentUserName(); // ✅ auto
-    if (!who || who === "—") return alert("Utilisateur non détecté.");
-
-    const ok = window.confirm("Confirmer: remis dans le trailer ?");
+    const ok = window.confirm("Confirmer: allé le chercher et remis dans le trailer ?");
     if (!ok) return;
 
     try {
+      // on marque les timestamps (log) puis on retourne qty + delete
+      await updateDoc(doc(db, "trailers", tId, "reparations", r.id), {
+        chercherAt: serverTimestamp(),
+        chercherByUid: auth.currentUser?.uid || null,
+        chercherByName: who,
+
+        remisTrailerAt: serverTimestamp(),
+        remisTrailerByUid: auth.currentUser?.uid || null,
+        remisTrailerByName: who,
+
+        pickupNote: (workerPickupNote || "").toString().trim() || null,
+      });
+
+      await logHistory?.("CHERCHER_ET_REMIS_TRAILER", {
+        trailerId: tId,
+        trailerNom: tNom,
+        trackId: r.id,
+        nom: r?.nom || "—",
+        qty: Number(r?.qty || 0),
+        status: "reparation",
+        equipementId: r?.equipementId || null,
+        note: (workerPickupNote || "").toString().trim() || null,
+        extra: { who, endroit: repairWhereLabel },
+      });
+
       await returnToTrailerAndDelete({ whoName: who });
 
-      await notifDone?.(r.id, "returned_trailer");
+      await notifDone?.(r.id, "pickup_returned_trailer");
       onClose?.();
     } catch (e) {
-      console.error("userReturnToTrailerAfterPret:", e);
+      console.error("userPickupAndReturnToTrailer:", e);
       alert("Erreur: " + (e?.message || "inconnue"));
     }
   }
@@ -829,12 +827,13 @@ export default function RepairTimelineModal({
   if (!visible) return null;
   if (typeof document === "undefined") return null;
 
-  // Styles rappel
+  // Styles rappel (ORANGE)
   const warnOrange = { background: "rgba(249,115,22,0.14)", border: "1px solid rgba(249,115,22,0.25)" };
-  const inRepairYellow = { background: "rgba(250,204,21,0.16)", border: "1px solid rgba(250,204,21,0.28)" };
+  const inRepairOrange = { background: "rgba(249,115,22,0.12)", border: "1px solid rgba(249,115,22,0.22)" };
 
-  // Condition "orange" (dans le MODAL) : après Reçu, avant En réparation
   const needRepairConfirmNow = isAdmin && actionType === "styro" && stepStyroRecuDone && !stepStyroMiseReparationDone;
+
+  const showInRepairInfo = status === "reparation" || stepPorteDone || stepStyroMiseReparationDone;
 
   const modal = (
     <div className="pt-modalOverlay" onMouseDown={onClose}>
@@ -849,6 +848,13 @@ export default function RepairTimelineModal({
         <div className="pt-modalBody">
           <div style={{ fontWeight: 1000, marginBottom: 8 }}>{r?.nom || "—"}</div>
           <div style={{ fontSize: 13.5, fontWeight: 900, opacity: 0.85 }}>{tNom}</div>
+
+          {/* ✅ affiche endroit/date quand en réparation */}
+          {showInRepairInfo ? (
+            <div style={{ marginTop: 10, ...inRepairOrange, borderRadius: 14, padding: "10px 12px", fontWeight: 950 }}>
+              🛠 En réparation — Depuis <b>{repairSinceLabel}</b> — Endroit: <b>{repairWhereLabel}</b>
+            </div>
+          ) : null}
 
           <TimelineHorizontal />
 
@@ -883,23 +889,43 @@ export default function RepairTimelineModal({
                     onChange={(e) => setAdminPo(e.target.value)}
                     placeholder="ex: PO-12345"
                   />
-                </div>
-              ) : null}
 
-              <div style={{ marginTop: 12 }}>
-                <div className="pt-modalLabel">Note (obligatoire)</div>
-                <input
-                  className="pt-input"
-                  value={adminNote}
-                  onChange={(e) => setAdminNote(e.target.value)}
-                  placeholder="Ex: instructions"
-                />
-              </div>
+                  {/* ✅ Endroit obligatoire */}
+                  <div className="pt-modalLabel" style={{ marginTop: 10 }}>
+                    Endroit (obligatoire)
+                  </div>
+                  <input
+                    className="pt-input"
+                    value={adminEndroit}
+                    onChange={(e) => setAdminEndroit(e.target.value)}
+                    placeholder="ex: Garage X / Atelier Y"
+                  />
+
+                  {/* ✅ Note optionnel */}
+                  <div className="pt-modalLabel" style={{ marginTop: 10 }}>
+                    Note (optionnel)
+                  </div>
+                  <textarea
+                    className="pt-input"
+                    style={{ minHeight: 80, resize: "vertical" }}
+                    value={adminNoteOpt}
+                    onChange={(e) => setAdminNoteOpt(e.target.value)}
+                    placeholder="Optionnel…"
+                  />
+                </div>
+              ) : (
+                <div style={{ marginTop: 12 }}>
+                  <div className="pt-modalLabel">Note (obligatoire)</div>
+                  <input
+                    className="pt-input"
+                    value={adminNoteOpt}
+                    onChange={(e) => setAdminNoteOpt(e.target.value)}
+                    placeholder="Quand le renvoyer"
+                  />
+                </div>
+              )}
             </div>
           ) : null}
-
-          {/* ✅ IMPORTANT: ON A ENLEVÉ LE BLOC "Décision admin (Étape 2)" ICI
-              parce que l'info est déjà visible dans la timeline à l'étape 2. */}
 
           {/* CHEMIN STYRO */}
           {stepAdminDecisionDone && actionType === "styro" ? (
@@ -933,7 +959,7 @@ export default function RepairTimelineModal({
               ) : null}
 
               {needRepairConfirmNow ? (
-                <div className="pt-modalBlock" style={{ marginTop: 14, ...warnOrange }}>
+                <div className={"pt-modalBlock pt-blinkOrange"} style={{ marginTop: 14, ...warnOrange }}>
                   <div className="pt-modalLabel">Étape 5 — Mettre en réparation</div>
                   <div style={{ marginTop: 8, fontSize: 12.5, fontWeight: 900, opacity: 0.9 }}>
                     ⚠️ Tant que tu n’as pas confirmé, la case reste ORANGE dans le tableau “Brisé”.
@@ -945,7 +971,7 @@ export default function RepairTimelineModal({
               ) : null}
 
               {isAdmin && stepStyroMiseReparationDone && !stepStyroRenvoyeDone ? (
-                <div className="pt-modalBlock" style={{ marginTop: 14, ...inRepairYellow }}>
+                <div className="pt-modalBlock" style={{ marginTop: 14, ...inRepairOrange }}>
                   <div className="pt-modalLabel">Étape 6 — Renvoyé</div>
 
                   <div style={{ marginTop: 10 }}>
@@ -972,20 +998,26 @@ export default function RepairTimelineModal({
             </>
           ) : null}
 
-          {/* CHEMIN ALLER FAIRE RÉPARER */}
+          {/* CHEMIN ALLER FAIRE RÉPARER (NOUVEAU) */}
           {stepAdminDecisionDone && actionType === "reparer" ? (
             <>
               {!isAdmin && !stepPorteDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 3 — Je l’ai porté à…</div>
+                  <div className="pt-modalLabel">Étape 3 — Porté</div>
 
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Porté à (obligatoire)</div>
-                    <input
+                    <div className="pt-modalLabel">Endroit</div>
+                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{repairWhereLabel}</div>
+                  </div>
+
+                  <div style={{ marginTop: 10 }}>
+                    <div className="pt-modalLabel">Note (optionnel)</div>
+                    <textarea
                       className="pt-input"
-                      value={porterWhere}
-                      onChange={(e) => setPorterWhere(e.target.value)}
-                      placeholder="ex: Garage X / Atelier Y"
+                      style={{ minHeight: 80, resize: "vertical" }}
+                      value={workerPorterNote}
+                      onChange={(e) => setWorkerPorterNote(e.target.value)}
+                      placeholder="Optionnel…"
                     />
                   </div>
 
@@ -1000,29 +1032,22 @@ export default function RepairTimelineModal({
                 </div>
               ) : null}
 
-              {!isAdmin && stepPorteDone && !stepChercheDone ? (
+              {/* ✅ Étape 4 = 1 seul bouton */}
+              {!isAdmin && stepPorteDone && !stepPickupReturnDone ? (
                 <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 4 — Je l’ai été le chercher</div>
-                  <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par</div>
-                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
-                  </div>
-                </div>
-              ) : null}
+                  <div className="pt-modalLabel">Étape 4 — Aller le chercher & remis trailer</div>
 
-              {!isAdmin && stepChercheDone && !stepPretDone ? (
-                <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 5 — Prêt à l’emploi</div>
                   <div style={{ marginTop: 10 }}>
-                    <div className="pt-modalLabel">Fait par</div>
-                    <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
+                    <div className="pt-modalLabel">Note (optionnel)</div>
+                    <textarea
+                      className="pt-input"
+                      style={{ minHeight: 80, resize: "vertical" }}
+                      value={workerPickupNote}
+                      onChange={(e) => setWorkerPickupNote(e.target.value)}
+                      placeholder="Optionnel…"
+                    />
                   </div>
-                </div>
-              ) : null}
 
-              {!isAdmin && stepPretDone ? (
-                <div className="pt-modalBlock" style={{ background: "#fff", marginTop: 14 }}>
-                  <div className="pt-modalLabel">Étape 6 — Remis dans le trailer</div>
                   <div style={{ marginTop: 10 }}>
                     <div className="pt-modalLabel">Fait par</div>
                     <div style={{ marginTop: 6, fontWeight: 950, opacity: 0.9 }}>{currentUserName()}</div>
@@ -1077,26 +1102,14 @@ export default function RepairTimelineModal({
           {stepAdminDecisionDone && actionType === "reparer" ? (
             <>
               {!isAdmin && !stepPorteDone ? (
-                <button className="pt-btn" type="button" onClick={userConfirmPorteA}>
-                  Confirmer: Porté à… (Étape 3)
+                <button className="pt-btn" type="button" onClick={userConfirmPorte}>
+                  Confirmer: Porté (Étape 3)
                 </button>
               ) : null}
 
-              {!isAdmin && stepPorteDone && !stepChercheDone ? (
-                <button className="pt-btn" type="button" onClick={userConfirmCherche}>
-                  Confirmer: Été le chercher (Étape 4)
-                </button>
-              ) : null}
-
-              {!isAdmin && stepChercheDone && !stepPretDone ? (
-                <button className="pt-btn" type="button" onClick={userConfirmPret}>
-                  Confirmer: Prêt à l’emploi (Étape 5)
-                </button>
-              ) : null}
-
-              {!isAdmin && stepPretDone ? (
-                <button className="pt-btn" type="button" onClick={userReturnToTrailerAfterPret}>
-                  Confirmer: Remis dans le trailer (Étape 6)
+              {!isAdmin && stepPorteDone && !stepPickupReturnDone ? (
+                <button className="pt-btn" type="button" onClick={userPickupAndReturnToTrailer}>
+                  Confirmer: Cherché & remis trailer (Étape 4)
                 </button>
               ) : null}
             </>
