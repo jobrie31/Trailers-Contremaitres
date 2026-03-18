@@ -93,7 +93,6 @@ function computeTurnInfo(r, isAdmin) {
     adminActionType.includes("envoyer") ||
     adminActionType.includes("send");
 
-  // ✅ élargi: inclut "réparer", "réparation", "reparer", "reparation"
   const isActionPorter =
     adminActionType.includes("porter") ||
     adminActionType.includes("aller") ||
@@ -114,18 +113,15 @@ function computeTurnInfo(r, isAdmin) {
         return { needsMe: true, label: "À répondre: envoyer à Styro", kind: "styro_send" };
       }
 
-      // ✅ NEW: Étape 4 (après renvoyé) => un seul bouton "chercher & remis trailer"
       if (isActionStyro && !!r?.styroRenvoyeAt && !r?.remisTrailerAt) {
         return { needsMe: true, label: "À répondre: chercher & remis trailer", kind: "styro_pickup_return" };
       }
 
-      // ✅ IMPORTANT: “Aller le faire réparer” = même logique que porter/shop => flash rouge tant que porterAt vide
       if (isActionPorter && !r?.porterAt) {
         return { needsMe: true, label: "À répondre: aller le faire réparer", kind: "porter" };
       }
     }
 
-    // ✅ NEW: Étape 4 générique (réparation ou autre) => si prêt mais pas remis trailer
     if (r?.pretAt && !r?.remisTrailerAt) {
       return { needsMe: true, label: "À répondre: chercher & remis trailer", kind: "pickup_return" };
     }
@@ -133,7 +129,6 @@ function computeTurnInfo(r, isAdmin) {
     return { needsMe: false, label: "", kind: "" };
   }
 
-  // ✅ Admin
   if (status === "brise" && !adminActionType) {
     return { needsMe: true, label: "À répondre: décider action", kind: "admin_decide" };
   }
@@ -256,7 +251,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     }
   }
 
-  // ✅ reset + snapshot
   useEffect(() => {
     setRows([]);
     setDragOver(false);
@@ -314,7 +308,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     return equipOptions.find((e) => (e.id || "").toString().trim() === eid) || null;
   }
 
-  // ---------- Dates ----------
   function fmtDateFR(d) {
     if (!d) return "—";
     try {
@@ -341,7 +334,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     return fmtDateFR(dateFromTs(r?.styroRecuAt));
   }
   function rowRepairSinceDate(r) {
-    // priorité: styroMiseReparationAt (si flow styro), sinon porterAt, sinon createdAt
     return fmtDateFR(dateFromTs(r?.styroMiseReparationAt || r?.porterAt || r?.createdAt));
   }
 
@@ -595,19 +587,17 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           from: { catId, itemId },
 
           adminActionType: null,
-          adminActionNote: null, // note optionnel (nouveau flow)
+          adminActionNote: null,
           adminActionPo: null,
           adminActionAt: null,
           adminActionByUid: null,
 
-          // ✅ Endroit (obligatoire sur action "Aller le faire réparer")
           porterWhere: null,
 
           porterAt: null,
           porterByUid: null,
           porterByName: null,
 
-          // ✅ Étape 4 (un seul bouton)
           chercherAt: null,
           chercherByUid: null,
           chercherByName: null,
@@ -770,7 +760,6 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
       ? label || "À répondre"
       : "Ouvrir la réparation";
 
-    // ✅ affichage demandé: date + endroit quand en réparation
     const repairSince = orangeInRepair ? rowRepairSinceDate(r) : "";
     const repairWhere = orangeInRepair ? ((r?.porterWhere || "").toString().trim() || "—") : "";
 
@@ -798,12 +787,39 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
       >
         <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 4 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 4, flexWrap: "wrap" }}>
               <div style={{ fontSize: 13.5, fontWeight: 1000, opacity: 0.9, minWidth: 0 }}>{tName}</div>
 
               {needs ? (
-                <span className="replyBlinkPill" title={label || "À répondre"}>
-                  <span className="replyBlinkDot" />
+                <span
+                  title={label || "À répondre"}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 14,
+                    padding: "12px 24px",
+                    borderRadius: 999,
+                    fontSize: 28,
+                    fontWeight: 1000,
+                    lineHeight: 1,
+                    color: "rgba(127, 29, 29, 0.98)",
+                    background: "rgba(239, 68, 68, 0.14)",
+                    border: "2px solid rgba(239, 68, 68, 0.35)",
+                    whiteSpace: "nowrap",
+                    animation: "replyBlinkPillPulse 1.0s infinite",
+                  }}
+                >
+                  <span
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: 999,
+                      background: "rgba(220, 38, 38, 0.95)",
+                      boxShadow: "0 0 0 0 rgba(220,38,38,0.35)",
+                      animation: "replyBlinkDotPulse 1.0s infinite",
+                      flex: "0 0 18px",
+                    }}
+                  />
                   {label || "À répondre"}
                 </span>
               ) : null}

@@ -1,8 +1,6 @@
-// src/PageTrailers.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -12,14 +10,11 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  updateDoc,
   where,
   writeBatch,
 } from "firebase/firestore";
 import { auth, db } from "./firebaseConfig";
 import "./PageTrailers.css";
-
-import PanelReparations from "./PanelReparations";
 
 /* ---------- Color helpers (uses categories.color) ---------- */
 const DEFAULT_COLOR = "#4F46E5";
@@ -59,9 +54,6 @@ function isUniteLabel(label) {
   return n === "unite" || n === "unité" || n.includes("unité") || n.includes("unite");
 }
 
-/**
- * label riche pour le dropdown "Ajouter équipement"
- */
 function optionLabelForEquipement(eq, catsGlobal) {
   const head = (eq?.nom || "").trim() || "—";
   const extras = [];
@@ -98,7 +90,7 @@ export default function PageTrailers() {
   const [meIsAdmin, setMeIsAdmin] = useState(false);
 
   const [equipements, setEquipements] = useState([]);
-  const [catsGlobal, setCatsGlobal] = useState([]); // [{id, nom, color, fields?}]
+  const [catsGlobal, setCatsGlobal] = useState([]);
 
   const [trailers, setTrailers] = useState([]);
   const [selectedTrailerId, setSelectedTrailerId] = useState(null);
@@ -114,10 +106,12 @@ export default function PageTrailers() {
   const [addEquipId, setAddEquipId] = useState("");
   const [addQty, setAddQty] = useState("");
 
-  const [qtyModalOpen, setQtyModalOpen] = useState(false);
-  const [qtyModalCatId, setQtyModalCatId] = useState("");
-  const [qtyModalItem, setQtyModalItem] = useState(null);
-  const [qtyModalDelta, setQtyModalDelta] = useState(1);
+  // Modal envoyer en réparation
+  const [repairSendOpen, setRepairSendOpen] = useState(false);
+  const [repairSendCatId, setRepairSendCatId] = useState("");
+  const [repairSendItem, setRepairSendItem] = useState(null);
+  const [repairSendQty, setRepairSendQty] = useState(1);
+  const [repairSendDest, setRepairSendDest] = useState("brise"); // "brise" | "jete"
 
   // -------- ÉCHANGE (admin only) --------
   const [showTrade, setShowTrade] = useState(false);
@@ -133,10 +127,6 @@ export default function PageTrailers() {
   const [tradeToCats, setTradeToCats] = useState([]);
   const [tradeToCatId, setTradeToCatId] = useState("");
 
-  // ✅ Anti “click modal” quand on vient de drag
-  const lastDragAtRef = useRef(0);
-
-  // ------------------------- Auth + Admin -------------------------
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       setMeUid(u?.uid || null);
@@ -158,7 +148,6 @@ export default function PageTrailers() {
     return () => unsub();
   }, []);
 
-  // ------------------------- Banque d’équipements -------------------------
   useEffect(() => {
     const qEq = query(collection(db, "equipements"), orderBy("createdAt", "desc"));
     return onSnapshot(
@@ -168,7 +157,6 @@ export default function PageTrailers() {
     );
   }, []);
 
-  // ------------------------- Catégories globales -------------------------
   useEffect(() => {
     const qC = query(collection(db, "categories"), orderBy("createdAt", "asc"));
     return onSnapshot(
@@ -182,7 +170,6 @@ export default function PageTrailers() {
     return [...catsGlobal].sort((a, b) => (a.nom || "").localeCompare(b.nom || "", "fr"));
   }, [catsGlobal]);
 
-  // ------------------------- Trailers -------------------------
   useEffect(() => {
     setTrailers([]);
     setSelectedTrailerId(null);
@@ -214,7 +201,6 @@ export default function PageTrailers() {
     [trailers, selectedTrailerId]
   );
 
-  // ------------------------- Categories du trailer sélectionné -------------------------
   useEffect(() => {
     setCategories([]);
     setItemsByCat({});
@@ -236,7 +222,6 @@ export default function PageTrailers() {
     );
   }, [selectedTrailerId]);
 
-  // ------------------------- ✅ Sync: chaque trailer a toutes les catégories globales -------------------------
   async function ensureAllCategoriesForTrailer(trailerId) {
     if (!trailerId) return;
     if (catsGlobalSorted.length === 0) return;
@@ -273,7 +258,6 @@ export default function PageTrailers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTrailerId, catsGlobalSorted.length]);
 
-  // ------------------------- Items par catégorie (listeners) -------------------------
   useEffect(() => {
     setItemsByCat({});
     if (!selectedTrailerId) return;
@@ -298,7 +282,6 @@ export default function PageTrailers() {
     return () => unsubs.forEach((u) => u && u());
   }, [categories, selectedTrailerId]);
 
-  // ------------------------- Helpers -------------------------
   function equipementsPourCategorieId(categorieId) {
     const cid = (categorieId || "").trim();
     return equipements
@@ -373,7 +356,6 @@ export default function PageTrailers() {
     return (it?.nom || "").trim() || "—";
   }
 
-  // ✅ NOUVEAU: Remarque (on affiche ce qu'on trouve sans "sous-entendu")
   function remarqueForTrailerItem(it) {
     const eq = equipementById(it?.equipementId);
 
@@ -388,7 +370,6 @@ export default function PageTrailers() {
     return pick(eq?.remarque, eq?.note, eq?.details?.remarque, eq?.details?.note, it?.remarque, it?.note);
   }
 
-  // ------------------------- Actions -------------------------
   function openAddEquipModalForCategory(globalCatId) {
     if (!selectedTrailerId) return;
     setShowAddEquip(true);
@@ -449,32 +430,158 @@ export default function PageTrailers() {
     setAddQty("");
   }
 
-  function openQtyModal(catId, item) {
-    setQtyModalCatId(catId);
-    setQtyModalItem(item);
-    setQtyModalDelta(1);
-    setQtyModalOpen(true);
+  function openRepairSendModal(catId, item) {
+    const available = Number(item?.qty || 0);
+    if (!Number.isFinite(available) || available <= 0) return;
+
+    setRepairSendCatId(catId);
+    setRepairSendItem(item);
+    setRepairSendQty(1);
+    setRepairSendDest("brise");
+    setRepairSendOpen(true);
   }
 
-  async function applyQtyDelta(sign) {
-    if (!selectedTrailerId) return;
-    if (!qtyModalOpen || !qtyModalCatId || !qtyModalItem?.id) return;
+  async function confirmSendToRepair() {
+    if (!selectedTrailerId || !repairSendCatId || !repairSendItem?.id) return;
 
-    const delta = Number(qtyModalDelta || 0);
-    if (!delta || delta <= 0) return alert("Entre une quantité valide (min 1).");
+    const qn = Number(repairSendQty || 0);
+    if (!Number.isFinite(qn) || qn <= 0) return alert("Quantité invalide (min 1).");
 
-    const current = Number(qtyModalItem.qty || 0);
-    const next = sign === "add" ? current + delta : current - delta;
+    const currentQty = Number(repairSendItem.qty || 0);
+    if (qn > currentQty) return alert(`Quantité trop grande. Dispo: ${currentQty}`);
 
-    const ref = doc(db, "trailers", selectedTrailerId, "categories", qtyModalCatId, "items", qtyModalItem.id);
+    const status = repairSendDest === "jete" ? "jete" : "brise";
+    const safeTrailerNom = (selectedTrailer?.trailerNom || "").toString().trim() || "—";
 
     try {
-      if (next <= 0) await deleteDoc(ref);
-      else await updateDoc(ref, { qty: next });
-      setQtyModalOpen(false);
+      const batch = writeBatch(db);
+
+      const itemRef = doc(
+        db,
+        "trailers",
+        selectedTrailerId,
+        "categories",
+        repairSendCatId,
+        "items",
+        repairSendItem.id
+      );
+
+      const remaining = currentQty - qn;
+      if (remaining <= 0) {
+        batch.delete(itemRef);
+      } else {
+        batch.update(itemRef, { qty: remaining });
+      }
+
+      const repRef = doc(collection(db, "trailers", selectedTrailerId, "reparations"));
+      batch.set(repRef, {
+        trackId: repRef.id,
+        status,
+        equipementId: repairSendItem.equipementId || null,
+        nom: (repairSendItem.nom || "").toString(),
+        unite: (repairSendItem.unite || "").toString(),
+        qty: qn,
+        trailerNom: safeTrailerNom,
+        createdAt: serverTimestamp(),
+        createdByUid: auth.currentUser?.uid || null,
+        source: "page_trailers_click",
+        from: { catId: repairSendCatId, itemId: repairSendItem.id },
+
+        adminActionType: null,
+        adminActionNote: null,
+        adminActionPo: null,
+        adminActionAt: null,
+        adminActionByUid: null,
+
+        porterWhere: null,
+        porterAt: null,
+        porterByUid: null,
+        porterByName: null,
+        porterNote: null,
+
+        chercherAt: null,
+        chercherByUid: null,
+        chercherByName: null,
+        remisTrailerAt: null,
+        remisTrailerByUid: null,
+        remisTrailerByName: null,
+        pickupNote: null,
+
+        pretAt: null,
+        pretByUid: null,
+        pretByName: null,
+
+        toStyroAt: null,
+        toStyroByUid: null,
+        toStyroByName: null,
+
+        styroRecuAt: null,
+        styroRecuByUid: null,
+        styroRecuNote: null,
+
+        needsAdminRepairConfirm: false,
+
+        styroMiseReparationAt: null,
+        styroMiseReparationByUid: null,
+
+        styroRenvoyeAt: null,
+        styroRenvoyeByUid: null,
+        styroRenvoyeTo: null,
+        styroRenvoyeNote: null,
+      });
+
+      const histRef = doc(collection(db, "reparations_history"));
+      batch.set(histRef, {
+        ts: serverTimestamp(),
+        trackId: repRef.id,
+        trailerId: selectedTrailerId,
+        trailerNom: safeTrailerNom,
+        byUid: auth.currentUser?.uid || null,
+        event: status === "jete" ? "AJOUT_JETE" : "AJOUT_BRISE",
+        nom: (repairSendItem.nom || "").toString(),
+        qty: qn,
+        status,
+        equipementId: repairSendItem.equipementId || null,
+        from: { catId: repairSendCatId, itemId: repairSendItem.id },
+        extra: {
+          trailerQtyBefore: currentQty,
+          trailerQtyAfter: remaining <= 0 ? 0 : remaining,
+          source: "page_trailers_click",
+        },
+      });
+
+      if (!meIsAdmin) {
+        const notifRef = doc(db, "notifications", repRef.id);
+        batch.set(notifRef, {
+          targetRole: "admin",
+          done: false,
+          createdAt: serverTimestamp(),
+          createdByUid: auth.currentUser?.uid || null,
+          type: "reparation_added",
+          status,
+          trailerId: selectedTrailerId,
+          trailerNom: safeTrailerNom,
+          repId: repRef.id,
+          nom: (repairSendItem.nom || "").toString(),
+          qty: qn,
+          source: "page_trailers_click",
+        });
+      }
+
+      await batch.commit();
+
+      setRepairSendOpen(false);
+      setRepairSendCatId("");
+      setRepairSendItem(null);
+      setRepairSendQty(1);
+      setRepairSendDest("brise");
+
+      try {
+        window.dispatchEvent(new CustomEvent("app_go_route", { detail: { route: "reparations" } }));
+      } catch {}
     } catch (e) {
-      console.error("applyQtyDelta:", e);
-      alert("Erreur modification quantité: " + (e?.message || "inconnue"));
+      console.error("confirmSendToRepair:", e);
+      alert("Erreur envoi réparation: " + (e?.message || "inconnue"));
     }
   }
 
@@ -484,7 +591,6 @@ export default function PageTrailers() {
     await deleteDoc(doc(db, "trailers", selectedTrailerId, "categories", catId, "items", itemId));
   }
 
-  // ------------------------- ÉCHANGE helpers (admin only) -------------------------
   async function loadCatsForTrailer(trailerId) {
     if (!trailerId) return [];
     const qC = query(collection(db, "trailers", trailerId, "categories"), orderBy("createdAt", "asc"));
@@ -649,34 +755,8 @@ export default function PageTrailers() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addCatGlobalId, equipements]);
 
-  // ✅ helper drag payload
-  function onDragStartItem(e, cat, it) {
-    if (!selectedTrailerId) return;
-    lastDragAtRef.current = Date.now();
-
-    const payload = {
-      type: "trailer_item",
-      trailerId: selectedTrailerId,
-      catId: cat.id,
-      catNom: cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie",
-      itemId: it.id,
-      nom: it.nom || "—",
-      remarque: remarqueForTrailerItem(it),
-      unite: it.unite || "",
-      equipementId: it.equipementId || null,
-      qty: it.qty || 1,
-    };
-
-    try {
-      e.dataTransfer.setData("application/x-gyrotech-item", JSON.stringify(payload));
-      e.dataTransfer.setData("text/plain", JSON.stringify(payload));
-      e.dataTransfer.effectAllowed = "move";
-    } catch {}
-  }
-
   function onClickRow(catId, it) {
-    if (Date.now() - (lastDragAtRef.current || 0) < 250) return;
-    openQtyModal(catId, it);
+    openRepairSendModal(catId, it);
   }
 
   return (
@@ -704,231 +784,203 @@ export default function PageTrailers() {
         </div>
       </div>
 
-      {/* ✅ Layout responsive (ordi: rail droite sticky, mobile: rail en haut) */}
-      <div className="pt-layout">
-        {/* MAIN */}
-        <div className="pt-main">
-          <div className="pt-grid">
-            {/* LEFT */}
-            <div className="pt-card">
-              <div className="pt-cardTitle">Liste des trailers</div>
+      <div className="pt-grid">
+        <div className="pt-card">
+          <div className="pt-cardTitle">Liste des trailers</div>
 
-              <div className="pt-list">
-                {trailers.length === 0 ? (
-                  <div className="pt-empty">Aucun trailer.</div>
-                ) : (
-                  trailers.map((t) => {
-                    const active = t.id === selectedTrailerId;
-                    return (
-                      <div
-                        key={t.id}
-                        className={`pt-trailerRow ${active ? "pt-trailerRowActive" : ""}`}
-                        onClick={() => setSelectedTrailerId(t.id)}
-                      >
-                        <div>
-                          <div className="pt-trailerName">{t.trailerNom || "Sans nom"}</div>
-                          <div className="pt-trailerMeta">Clique pour ouvrir</div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              {meIsAdmin && trailers.length < 2 && (
-                <div className="pt-footHint" style={{ marginTop: 10 }}>
-                  Ajoute au moins 2 trailers pour utiliser “Faire un échange”.
-                </div>
-              )}
-            </div>
-
-            {/* RIGHT */}
-            <div className="pt-card">
-              {!selectedTrailer ? (
-                <div className="pt-empty">Choisis un trailer.</div>
-              ) : (
-                <>
-                  <div className="pt-detailHead">
-                    <h2 className="pt-detailTitle pt-detailTitleNoMargin">{selectedTrailer.trailerNom}</h2>
-
-                    <input
-                      className="pt-input pt-search pt-searchInline"
-                      placeholder="Rechercher un équipement"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                      disabled={!selectedTrailerId}
-                    />
-                  </div>
-
-                  {categoriesSorted.length === 0 ? (
-                    <div className="pt-empty">Chargement des catégories…</div>
-                  ) : (
-                    <div className="pt-cats">
-                      {categoriesSorted.map((cat) => {
-                        const itemsAll = itemsByCat[cat.id] || [];
-                        const items = filterItems(itemsAll, cat.id);
-
-                        const qGlobal = (search || "").trim();
-                        const qLocal = (searchByCat?.[cat.id] || "").trim();
-                        if ((qGlobal || qLocal) && items.length === 0) return null;
-
-                        const base = catColorFromId(catsGlobal, cat.categorieId);
-                        const cols = fieldsForGlobalCatId(cat.categorieId);
-
-                        return (
-                          <div
-                            key={cat.id}
-                            className="pt-section"
-                            style={{
-                              background: withAlpha(base, 0.12),
-                              borderColor: withAlpha(base, 0.35),
-                            }}
-                          >
-                            <div className="pt-sectionHead">
-                              <div className="pt-sectionLeft">
-                                <div className="pt-sectionName">
-                                  <span aria-hidden="true" className="pt-dot" style={{ background: base }} />
-                                  <span>{cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie"}</span>
-                                </div>
-                              </div>
-
-                              <div className="pt-sectionRight">
-                                <div className="pt-catMeta">
-                                  {itemsAll.length} item{itemsAll.length > 1 ? "s" : ""}
-                                </div>
-
-                                <button
-                                  type="button"
-                                  className="pt-btn"
-                                  style={{ height: 32, padding: "0 10px" }}
-                                  onClick={() => openAddEquipModalForCategory(cat.categorieId)}
-                                  title="Ajouter un équipement dans cette catégorie"
-                                  disabled={!selectedTrailerId}
-                                >
-                                  +
-                                </button>
-                              </div>
-                            </div>
-
-                            {itemsAll.length === 0 ? (
-                              <div className="pt-empty" style={{ marginTop: 10 }}>
-                                Aucun item dans cette catégorie.
-                              </div>
-                            ) : items.length === 0 ? (
-                              <div className="pt-empty" style={{ marginTop: 10 }}>
-                                Aucun résultat.
-                              </div>
-                            ) : (
-                              <div className="pt-tableWrap pt-tableWrapScroll10">
-                                <table className="pt-table">
-                                  <thead>
-                                    <tr>
-                                      <th className="pt-th">Produit / Remarque</th>
-                                      {cols.map((f) => (
-                                        <th key={f.id} className="pt-th">
-                                          {f.nom}
-                                        </th>
-                                      ))}
-                                      <th className="pt-th" style={{ textAlign: "right" }}>
-                                        Qté
-                                      </th>
-                                      <th className="pt-th" style={{ textAlign: "right" }}>
-                                        Actions
-                                      </th>
-                                    </tr>
-                                  </thead>
-
-                                  <tbody>
-                                    {items.map((it) => {
-                                      const remarque = remarqueForTrailerItem(it);
-                                      return (
-                                        <tr
-                                          key={it.id}
-                                          className="pt-draggableRow"
-                                          draggable
-                                          onDragStart={(e) => onDragStartItem(e, cat, it)}
-                                          onClick={() => onClickRow(cat.id, it)}
-                                          title="Drag & drop vers Brisé/Réparation (ou clique pour ajuster la quantité)"
-                                        >
-                                          <td className="pt-td">
-                                            <div className="pt-itemCell">
-                                              <div className="pt-itemTop">
-                                                <span className="pt-dragHandle" aria-hidden="true">
-                                                  ⠿
-                                                </span>
-                                                <span className="pt-itemName">{it.nom || "—"}</span>
-                                              </div>
-
-                                              {remarque ? (
-                                                <div className="pt-itemRemark">{remarque}</div>
-                                              ) : (
-                                                <div className="pt-itemRemark pt-itemRemarkEmpty">—</div>
-                                              )}
-                                            </div>
-                                          </td>
-
-                                          {cols.map((f) => {
-                                            const v = valueForItemField(it, f);
-                                            return (
-                                              <td key={f.id} className="pt-td">
-                                                {v ? v : <span style={{ opacity: 0.55 }}>—</span>}
-                                              </td>
-                                            );
-                                          })}
-
-                                          <td className="pt-td" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                                            <span
-                                              className="pt-qtyBadge"
-                                              style={{ display: "inline-flex", justifyContent: "flex-end" }}
-                                            >
-                                              <span>{Number(it.qty || 0)}</span>
-                                            </span>
-                                          </td>
-
-                                          <td
-                                            className="pt-td"
-                                            style={{ textAlign: "right" }}
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            <button
-                                              type="button"
-                                              className="pt-btnDanger"
-                                              onClick={() => supprimerItem(cat.id, it.id)}
-                                            >
-                                              X
-                                            </button>
-                                          </td>
-                                        </tr>
-                                      );
-                                    })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+          <div className="pt-list">
+            {trailers.length === 0 ? (
+              <div className="pt-empty">Aucun trailer.</div>
+            ) : (
+              trailers.map((t) => {
+                const active = t.id === selectedTrailerId;
+                return (
+                  <div
+                    key={t.id}
+                    className={`pt-trailerRow ${active ? "pt-trailerRowActive" : ""}`}
+                    onClick={() => setSelectedTrailerId(t.id)}
+                  >
+                    <div>
+                      <div className="pt-trailerName">{t.trailerNom || "Sans nom"}</div>
+                      <div className="pt-trailerMeta">Clique pour ouvrir</div>
                     </div>
-                  )}
-                </>
-              )}
-            </div>
+                  </div>
+                );
+              })
+            )}
           </div>
+
+          {meIsAdmin && trailers.length < 2 && (
+            <div className="pt-footHint" style={{ marginTop: 10 }}>
+              Ajoute au moins 2 trailers pour utiliser “Faire un échange”.
+            </div>
+          )}
         </div>
 
-        {/* RIGHT RAIL */}
-        <aside className="pt-railWrap">
-          <PanelReparations
-            trailerId={selectedTrailerId}
-            trailerNom={selectedTrailer?.trailerNom || ""}
-            isAdmin={meIsAdmin}
-            equipements={equipements}
-            catsGlobal={catsGlobal}
-          />
-        </aside>
+        <div className="pt-card">
+          {!selectedTrailer ? (
+            <div className="pt-empty">Choisis un trailer.</div>
+          ) : (
+            <>
+              <div className="pt-detailHead">
+                <h2 className="pt-detailTitle pt-detailTitleNoMargin">{selectedTrailer.trailerNom}</h2>
+
+                <input
+                  className="pt-input pt-search pt-searchInline"
+                  placeholder="Rechercher un équipement"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  disabled={!selectedTrailerId}
+                />
+              </div>
+
+              {categoriesSorted.length === 0 ? (
+                <div className="pt-empty">Chargement des catégories…</div>
+              ) : (
+                <div className="pt-cats">
+                  {categoriesSorted.map((cat) => {
+                    const itemsAll = itemsByCat[cat.id] || [];
+                    const items = filterItems(itemsAll, cat.id);
+
+                    const qGlobal = (search || "").trim();
+                    const qLocal = (searchByCat?.[cat.id] || "").trim();
+                    if ((qGlobal || qLocal) && items.length === 0) return null;
+
+                    const base = catColorFromId(catsGlobal, cat.categorieId);
+                    const cols = fieldsForGlobalCatId(cat.categorieId);
+
+                    return (
+                      <div
+                        key={cat.id}
+                        className="pt-section"
+                        style={{
+                          background: withAlpha(base, 0.12),
+                          borderColor: withAlpha(base, 0.35),
+                        }}
+                      >
+                        <div className="pt-sectionHead">
+                          <div className="pt-sectionLeft">
+                            <div className="pt-sectionName">
+                              <span aria-hidden="true" className="pt-dot" style={{ background: base }} />
+                              <span>{cat.nom || catNameFromId(catsGlobal, cat.categorieId) || "Catégorie"}</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-sectionRight">
+                            <div className="pt-catMeta">
+                              {itemsAll.length} item{itemsAll.length > 1 ? "s" : ""}
+                            </div>
+
+                            <button
+                              type="button"
+                              className="pt-btn"
+                              style={{ height: 32, padding: "0 10px" }}
+                              onClick={() => openAddEquipModalForCategory(cat.categorieId)}
+                              title="Ajouter un équipement dans cette catégorie"
+                              disabled={!selectedTrailerId}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {itemsAll.length === 0 ? (
+                          <div className="pt-empty" style={{ marginTop: 10 }}>
+                            Aucun item dans cette catégorie.
+                          </div>
+                        ) : items.length === 0 ? (
+                          <div className="pt-empty" style={{ marginTop: 10 }}>
+                            Aucun résultat.
+                          </div>
+                        ) : (
+                          <div className="pt-tableWrap pt-tableWrapScroll10">
+                            <table className="pt-table">
+                              <thead>
+                                <tr>
+                                  <th className="pt-th">Produit / Remarque</th>
+                                  {cols.map((f) => (
+                                    <th key={f.id} className="pt-th">
+                                      {f.nom}
+                                    </th>
+                                  ))}
+                                  <th className="pt-th" style={{ textAlign: "right" }}>
+                                    Qté
+                                  </th>
+                                  <th className="pt-th" style={{ textAlign: "right" }}>
+                                    Actions
+                                  </th>
+                                </tr>
+                              </thead>
+
+                              <tbody>
+                                {items.map((it) => {
+                                  const remarque = remarqueForTrailerItem(it);
+                                  return (
+                                    <tr
+                                      key={it.id}
+                                      onClick={() => onClickRow(cat.id, it)}
+                                      title="Cliquer pour envoyer en réparation"
+                                      style={{ cursor: "pointer" }}
+                                    >
+                                      <td className="pt-td">
+                                        <div className="pt-itemCell">
+                                          <div className="pt-itemTop">
+                                            <span className="pt-itemName">{it.nom || "—"}</span>
+                                          </div>
+
+                                          {remarque ? (
+                                            <div className="pt-itemRemark">{remarque}</div>
+                                          ) : (
+                                            <div className="pt-itemRemark pt-itemRemarkEmpty">—</div>
+                                          )}
+                                        </div>
+                                      </td>
+
+                                      {cols.map((f) => {
+                                        const v = valueForItemField(it, f);
+                                        return (
+                                          <td key={f.id} className="pt-td">
+                                            {v ? v : <span style={{ opacity: 0.55 }}>—</span>}
+                                          </td>
+                                        );
+                                      })}
+
+                                      <td className="pt-td" style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                                        <span style={{ display: "inline-flex", justifyContent: "flex-end" }}>
+                                          <span>{Number(it.qty || 0)}</span>
+                                        </span>
+                                      </td>
+
+                                      <td
+                                        className="pt-td"
+                                        style={{ textAlign: "right" }}
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <button
+                                          type="button"
+                                          className="pt-btnDanger"
+                                          onClick={() => supprimerItem(cat.id, it.id)}
+                                        >
+                                          X
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
-      {/* ---------------- MODAL AJOUT ÉQUIPEMENT ---------------- */}
       {showAddEquip && (
         <div className="pt-modalOverlay" onClick={() => setShowAddEquip(false)}>
           <div className="pt-modal pt-modalSmall" onClick={(e) => e.stopPropagation()}>
@@ -966,7 +1018,9 @@ export default function PageTrailers() {
                   placeholder="Obligatoire"
                 />
 
-                <div className="pt-modalHint">Si l’équipement existe déjà dans cette catégorie, la quantité sera additionnée.</div>
+                <div className="pt-modalHint">
+                  Si l’équipement existe déjà dans cette catégorie, la quantité sera additionnée.
+                </div>
               </div>
             </div>
 
@@ -982,58 +1036,61 @@ export default function PageTrailers() {
         </div>
       )}
 
-      {/* ---------------- MODAL AJUSTER QUANTITÉ ---------------- */}
-      {qtyModalOpen && qtyModalItem && (
-        <div className="pt-modalOverlay" onClick={() => setQtyModalOpen(false)}>
+      {repairSendOpen && repairSendItem && (
+        <div className="pt-modalOverlay" onClick={() => setRepairSendOpen(false)}>
           <div className="pt-modal pt-modalSmall" onClick={(e) => e.stopPropagation()}>
             <div className="pt-modalHead">
-              <div className="pt-modalTitle">Ajuster quantité</div>
-              <button className="pt-modalClose" type="button" onClick={() => setQtyModalOpen(false)}>
+              <div className="pt-modalTitle">Envoyer en réparation</div>
+              <button className="pt-modalClose" type="button" onClick={() => setRepairSendOpen(false)}>
                 ✕
               </button>
             </div>
 
             <div className="pt-modalBody">
-              <div className="pt-qtyTop">
-                <div className="pt-qtyTitle">{labelForTrailerItem(qtyModalItem)}</div>
-                <div className="pt-qtyCurrent">
-                  Qté actuelle: <b>{Number(qtyModalItem.qty || 0)}</b>
-                </div>
+              <div style={{ fontWeight: 1000, marginBottom: 8 }}>{repairSendItem.nom || "—"}</div>
+
+              <div style={{ opacity: 0.75, marginBottom: 12 }}>
+                Dispo dans le trailer: <b>{Number(repairSendItem.qty || 0)}</b>
               </div>
 
               <div className="pt-modalBlock" style={{ background: "#fff" }}>
-                <div className="pt-modalLabel">Combien ajouter / enlever ?</div>
+                <div className="pt-modalLabel">Type</div>
+                <select
+                  className="pt-select"
+                  value={repairSendDest}
+                  onChange={(e) => setRepairSendDest(e.target.value)}
+                >
+                  <option value="brise">Brisé</option>
+                  <option value="jete">Brisé à jeté</option>
+                </select>
+
+                <div className="pt-modalLabel" style={{ marginTop: 10 }}>
+                  Quantité
+                </div>
                 <input
-                  className="pt-input pt-qtyInput pt-noSpin"
+                  className="pt-input pt-noSpin"
                   type="number"
                   min="1"
-                  value={qtyModalDelta}
-                  onChange={(e) => setQtyModalDelta(e.target.value)}
+                  max={Number(repairSendItem.qty || 0) || undefined}
+                  value={repairSendQty}
+                  onChange={(e) => setRepairSendQty(e.target.value)}
+                  placeholder="1"
                 />
-
-                <div className="pt-qtyActions">
-                  <button className="pt-btn" type="button" onClick={() => applyQtyDelta("add")}>
-                    Ajouter
-                  </button>
-                  <button className="pt-btnDangerWide" type="button" onClick={() => applyQtyDelta("remove")}>
-                    Enlever
-                  </button>
-                </div>
-
-                <div className="pt-modalHint">Si la quantité tombe à 0 ou moins, l’équipement est retiré du trailer.</div>
               </div>
             </div>
 
             <div className="pt-modalFoot">
-              <button className="pt-btn pt-btnGhost" type="button" onClick={() => setQtyModalOpen(false)}>
-                Fermer
+              <button className="pt-btn" type="button" onClick={confirmSendToRepair}>
+                Confirmer
+              </button>
+              <button className="pt-btn pt-btnGhost" type="button" onClick={() => setRepairSendOpen(false)}>
+                Annuler
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ---------------- MODAL ÉCHANGE (ADMIN) ---------------- */}
       {showTrade && meIsAdmin && (
         <div className="pt-modalOverlay" onClick={() => setShowTrade(false)}>
           <div className="pt-modal" onClick={(e) => e.stopPropagation()}>
@@ -1112,7 +1169,9 @@ export default function PageTrailers() {
                     ))}
                   </select>
 
-                  <div className="pt-modalHint">Astuce: si le trailer destination a la même catégorie, je la sélectionne automatiquement.</div>
+                  <div className="pt-modalHint">
+                    Astuce: si le trailer destination a la même catégorie, je la sélectionne automatiquement.
+                  </div>
                 </div>
               </div>
             </div>

@@ -40,27 +40,6 @@
   justify-content: flex-end;
 }
 
-/* ✅ NOUVEAU: layout global (main + rail) */
-.pt-layout{
-  --rail-w: 420px;
-  display: grid;
-  grid-template-columns: 1fr var(--rail-w);
-  gap: 14px;
-  align-items: start;
-}
-
-.pt-main{
-  min-width: 0; /* important pour overflow/table */
-}
-
-.pt-railWrap{
-  width: var(--rail-w);
-  position: sticky;
-  top: 12px;
-  align-self: start;
-}
-
-/* Desktop large: garde ton look */
 .pt-grid{
   display:grid;
   grid-template-columns: 360px 1fr;
@@ -112,8 +91,6 @@
   box-sizing: border-box;
   background:#fff;
   font-weight: 800;
-
-  /* ✅ iOS: évite le zoom automatique */
   font-size: 16px;
 }
 
@@ -130,8 +107,6 @@
   font-weight: 900;
   padding: 0 14px;
   cursor: pointer;
-
-  /* ✅ mobile */
   touch-action: manipulation;
 }
 
@@ -160,8 +135,6 @@
   font-weight: 1000;
   padding: 0;
   line-height: 1;
-
-  /* ✅ touch target */
   touch-action: manipulation;
 }
 
@@ -268,8 +241,6 @@
 .pt-tableWrap{
   overflow-x: auto;
   margin-top: 6px;
-
-  /* ✅ iOS scroll smooth */
   -webkit-overflow-scrolling: touch;
 }
 
@@ -292,10 +263,7 @@
   background: rgba(255,255,255,0.6);
   position: sticky;
   top: 0;
-
-  /* ✅ IMPORTANT: garde sticky AU-DESSUS des lignes, mais PAS au-dessus des modals */
   z-index: 2;
-
   white-space: nowrap;
   line-height: 1.05;
   vertical-align: middle;
@@ -325,7 +293,7 @@
 }
 
 /* =========================
-   ✅ Nom produit + remarque (dans la même cellule)
+   Nom produit + remarque
    ========================= */
 .pt-itemCell{
   display: grid;
@@ -362,7 +330,7 @@
 }
 
 /* =========================
-   Recherche à côté du titre de la catégorie
+   Recherche / header section
    ========================= */
 .pt-sectionHead{
   align-items: center;
@@ -413,13 +381,11 @@
   overflow-y: auto !important;
   overflow-x: auto !important;
   scrollbar-gutter: stable;
-
-  /* ✅ iOS */
   -webkit-overflow-scrolling: touch;
 }
 
 /* =========================
-   Titre trailer + recherche sur 1 ligne
+   Titre trailer + recherche
    ========================= */
 .pt-detailHead{
   display:flex;
@@ -439,14 +405,12 @@
 }
 
 /* =========================
-   Bouton échange fixé (desktop)
+   Bouton échange fixé
    ========================= */
 .pt-btnSwapFixed{
   position: fixed;
   left: 18px;
   top: 92px;
-
-  /* ✅ IMPORTANT: reste en dessous des modals */
   z-index: 200;
 }
 
@@ -461,11 +425,7 @@
   align-items:center;
   justify-content:center;
   padding: 16px;
-
-  /* ✅ FIX BUG: le header sticky du tableau ne doit JAMAIS passer par-dessus le popup */
   z-index: 9999;
-
-  /* crée un nouveau contexte d'empilement, aide sur certains navigateurs */
   isolation: isolate;
 }
 
@@ -476,7 +436,6 @@
   border: 1px solid rgba(15,23,42,0.12);
   box-shadow: 0 20px 55px rgba(0,0,0,0.25);
   overflow: hidden;
-
   position: relative;
   z-index: 10000;
 }
@@ -570,7 +529,6 @@
   margin-top: 10px;
 }
 
-/* ✅ Enlever spinners input number */
 .pt-noSpin{
   appearance: textfield;
   -moz-appearance: textfield;
@@ -582,345 +540,9 @@
 }
 
 /* =========================
-   DRAG & DROP (items)
+   RESPONSIVE
    ========================= */
-.pt-draggableRow{
-  cursor: grab;
-}
-.pt-draggableRow:active{
-  cursor: grabbing;
-}
-.pt-dragHandle{
-  opacity: 0.55;
-  font-weight: 1000;
-  line-height: 1;
-  user-select: none;
-}
-.pt-draggableRow:hover .pt-dragHandle{
-  opacity: 0.9;
-}
-
-/* =========================
-   Bris / Réparation (Rail droite) — UI PRO
-   ========================= */
-.pr-rail{
-  display: grid;
-  gap: 12px;
-
-  /* ✅ IMPORTANT: on enlève le hack translateX, le layout s'en occupe */
-  transform: none;
-}
-
-/* Card de base */
-.pr-card{
-  background:#fff;
-  border:1px solid rgba(15,23,42,0.10);
-  border-radius:16px;
-  padding: 12px;
-  box-shadow: 0 10px 25px rgba(0,0,0,0.06);
-}
-
-.pr-headTop{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap: 12px;
-}
-
-.pr-title{
-  font-size: 16px;
-  font-weight: 1000;
-  line-height: 1.1;
-}
-
-.pr-sub{
-  margin-top: 6px;
-  font-size: 12px;
-  color: rgba(15,23,42,0.70);
-  font-weight: 800;
-  line-height: 1.25;
-}
-
-.pr-badges{
-  display:flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-}
-
-.pr-pill{
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-weight: 950;
-  font-size: 12px;
-  border: 1px solid rgba(15,23,42,0.10);
-  background: rgba(15,23,42,0.02);
-}
-
-.pr-pillRed{
-  border-color: rgba(239,68,68,0.30);
-  background: rgba(239,68,68,0.10);
-  color: rgba(127,29,29,0.95);
-}
-
-.pr-pillAmber{
-  border-color: rgba(245,158,11,0.30);
-  background: rgba(245,158,11,0.10);
-  color: rgba(120,53,15,0.95);
-}
-
-/* Dropzone */
-.pr-dropZone{
-  margin-top: 10px;
-  border: 2px dashed rgba(15,23,42,0.18);
-  background: rgba(15,23,42,0.02);
-  border-radius: 16px;
-  padding: 12px;
-  display:flex;
-  gap: 12px;
-  align-items:center;
-  user-select: none;
-  transition: 120ms ease;
-}
-
-.pr-dropZoneOver{
-  border-color: rgba(79,70,229,0.55);
-  background: rgba(79,70,229,0.08);
-  transform: translateY(-1px);
-}
-
-.pr-dropZoneDisabled{
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.pr-dropIcon{
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  font-weight: 1000;
-  background: rgba(15,23,42,0.06);
-}
-
-.pr-dropText{
-  min-width: 0;
-}
-
-.pr-dropTitle{
-  font-weight: 1000;
-}
-
-.pr-dropHint{
-  margin-top: 2px;
-  font-size: 12px;
-  color: rgba(15,23,42,0.65);
-  font-weight: 850;
-}
-
-/* Form ajout manuel */
-.pr-form{
-  margin-top: 10px;
-  display:grid;
-  grid-template-columns: 1fr 90px auto;
-  gap: 10px;
-  align-items:center;
-}
-
-.pr-inputTight{
-  height: 38px !important;
-  border-radius: 14px;
-}
-
-.pr-inputQty{
-  height: 38px !important;
-  border-radius: 14px;
-  text-align: center;
-  font-weight: 1000 !important;
-}
-
-.pr-btnTight{
-  height: 38px !important;
-  border-radius: 14px;
-  padding: 0 12px !important;
-}
-
-/* Sections */
-.pr-sectionHead{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.pr-sectionTitle{
-  display:flex;
-  align-items:center;
-  gap: 8px;
-  font-weight: 1000;
-}
-
-.pr-sectionMeta{
-  font-size: 12px;
-  color: rgba(15,23,42,0.65);
-  font-weight: 900;
-}
-
-.pr-dot{
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-}
-
-.pr-dotRed{ background: rgba(239,68,68,0.95); }
-.pr-dotAmber{ background: rgba(245,158,11,0.95); }
-
-.pr-empty{
-  padding: 10px;
-  border-radius: 14px;
-  border: 1px dashed rgba(15,23,42,0.14);
-  background: rgba(15,23,42,0.02);
-  font-weight: 850;
-  color: rgba(15,23,42,0.60);
-}
-
-/* Liste */
-.pr-list{
-  display:grid;
-  gap: 8px;
-}
-
-.pr-row{
-  border: 1px solid rgba(15,23,42,0.10);
-  background: rgba(255,255,255,0.85);
-  border-radius: 14px;
-  padding: 10px;
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap: 10px;
-}
-
-.pr-rowMain{
-  min-width: 0;
-}
-
-.pr-rowName{
-  font-weight: 1000;
-  line-height: 1.15;
-}
-
-.pr-rowMeta{
-  margin-top: 4px;
-  font-size: 12px;
-  color: rgba(15,23,42,0.70);
-  font-weight: 850;
-}
-
-.pr-rowActions{
-  display:flex;
-  gap: 8px;
-  align-items:center;
-  flex: 0 0 auto;
-}
-
-/* Boutons rail */
-.pr-btn{
-  height: 44px;
-  border-radius: 14px;
-  border: none;
-  cursor: pointer;
-  font-weight: 950;
-  padding: 0 12px;
-  background: #111827;
-  color: #fff;
-  touch-action: manipulation;
-}
-
-.pr-btnGhost{
-  background:#fff;
-  color:#111827;
-  border: 1px solid rgba(15,23,42,0.14);
-}
-
-.pr-btnDanger{
-  background: rgba(239,68,68,0.10);
-  color: rgba(127,29,29,0.95);
-  border: 1px solid rgba(239,68,68,0.35);
-  width: 44px;
-  padding: 0;
-}
-
-/* Meta réparation */
-.pr-repairMeta{
-  margin-top: 6px;
-  display:flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.pr-miniPill{
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
-  padding: 5px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 900;
-  border: 1px solid rgba(15,23,42,0.10);
-  background: rgba(15,23,42,0.03);
-  color: rgba(15,23,42,0.75);
-}
-
-.pr-note{
-  margin-top: 6px;
-  font-size: 12px;
-  font-weight: 900;
-  color: rgba(15,23,42,0.70);
-  line-height: 1.25;
-}
-
-/* Modal grid */
-.pr-modalGrid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.pr-span2{
-  grid-column: span 2;
-}
-
-/* =========================
-   ✅ RESPONSIVE (iPad / iPhone)
-   ========================= */
-
-/* iPad / petits écrans: rail moins large */
-@media (max-width: 1100px){
-  .pt-layout{
-    --rail-w: 360px;
-  }
-}
-
-/* ✅ Mobile & iPad portrait: rail en haut, grid en 1 colonne */
 @media (max-width: 900px){
-  .pt-layout{
-    display:flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .pt-railWrap{
-    position: static;     /* pas sticky sur mobile */
-    width: 100%;
-    order: -1;            /* rail en haut */
-  }
-
   .pt-grid{
     grid-template-columns: 1fr;
   }
@@ -935,12 +557,10 @@
     max-width: 100%;
   }
 
-  /* Le scroll vertical de tableau: plus adapté au téléphone */
   .pt-tableWrapScroll10{
     max-height: 50vh !important;
   }
 
-  /* Bouton échange: ne couvre pas l'écran */
   .pt-btnSwapFixed{
     position: static;
     left: auto;
@@ -951,20 +571,6 @@
     grid-template-columns: 1fr;
   }
 
-  .pr-form{
-    grid-template-columns: 1fr 90px;
-  }
-  .pr-btnTight{
-    grid-column: 1 / -1;
-  }
-  .pr-modalGrid{
-    grid-template-columns: 1fr;
-  }
-  .pr-span2{
-    grid-column: span 1;
-  }
-
-  /* Recherche catégorie devient plus flexible */
   .pt-catSearch{
     width: 160px !important;
     flex: 0 0 160px !important;
