@@ -8,6 +8,7 @@ import {
   collectionGroup,
   deleteDoc,
   doc,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
@@ -222,19 +223,41 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     }
   }
 
+  async function resolveVisibleToUid(payload = {}) {
+    if (payload?.visibleToUid) return payload.visibleToUid;
+
+    const tId = (payload?.trailerId || trailerId || "").toString().trim();
+    if (!tId) return null;
+
+    try {
+      const trailerSnap = await getDoc(doc(db, "trailers", tId));
+      if (!trailerSnap.exists()) return null;
+      return (trailerSnap.data()?.ownerUid || null) ?? null;
+    } catch (e) {
+      console.error("resolveVisibleToUid error:", e);
+      return null;
+    }
+  }
+
   async function logHistory(eventName, payload = {}) {
     try {
       const u = auth.currentUser;
 
       const tId = (payload?.trailerId || trailerId || null) ?? null;
       const tNom = (payload?.trailerNom || trailerNom || "—").toString().trim() || "—";
+      const visibleToUid = await resolveVisibleToUid(payload);
 
       await addDoc(collection(db, "reparations_history"), {
         ts: serverTimestamp(),
         trackId: payload?.trackId || null,
         trailerId: tId,
         trailerNom: tNom,
+
         byUid: u?.uid || null,
+        whoName: (u?.email || "").trim().toLowerCase(),
+
+        visibleToUid: visibleToUid,
+
         event: (eventName || "").toString().trim() || "—",
         nom: payload?.nom ?? null,
         qty: payload?.qty ?? null,
@@ -406,10 +429,11 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
   }
 
   function equipMetaForRow(r) {
-    const eq = findEquipById(r?.equipementId);
-    if (!eq) return { line: "", remarque: "" };
+    const eq = findEquipById(r);
+    const eq2 = findEquipById(r?.equipementId);
+    if (!eq2) return { line: "", remarque: "" };
 
-    const details = eq?.details || {};
+    const details = eq2?.details || {};
 
     const produit = getDetail(details, ["produit", "product", "item"]);
     const caracteristique = stripCaracteristiquePrefix(
@@ -429,7 +453,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     if (serie) parts.push(`Série: ${serie}`);
     if (dimension) parts.push(`Dim: ${dimension}`);
 
-    const remarque = (eq?.remarque ?? eq?.note ?? details?.remarque ?? details?.note ?? "").toString().trim() || "";
+    const remarque = (eq2?.remarque ?? eq2?.note ?? details?.remarque ?? details?.note ?? "").toString().trim() || "";
     return { line: parts.join(" • "), remarque };
   }
 
@@ -447,6 +471,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         trailerId: tId,
         trailerNom: getRowTrailerNom(r),
         trackId: r.id,
+        visibleToUid: r?.visibleToUid || null,
         nom: r?.nom || "—",
         qty: Number(r?.qty || 0),
         status: (r?.status || "").toString().trim() || null,
@@ -493,6 +518,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
         trailerId: tId,
         trailerNom: getRowTrailerNom(suiviRow),
         trackId: suiviRow.id,
+        visibleToUid: suiviRow?.visibleToUid || null,
         nom: suiviRow?.nom || "—",
         qty: Number(suiviRow?.qty || 0),
         status: (suiviRow?.status || "").toString().trim() || "jete",
@@ -560,6 +586,10 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
     const historyEvent = status === "jete" ? "AJOUT_JETE" : "AJOUT_BRISE";
 
     try {
+      const trailerSnap = await getDoc(doc(db, "trailers", trailerId));
+      const trailerData = trailerSnap.exists() ? trailerSnap.data() || {} : {};
+      const visibleToUid = trailerData?.ownerUid || null;
+
       await runTransaction(db, async (tx) => {
         const itemRef = doc(db, "trailers", trailerId, "categories", catId, "items", itemId);
         const snap = await tx.get(itemRef);
@@ -581,6 +611,7 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           nom,
           qty: qn,
           trailerNom: safeTrailerNom,
+          visibleToUid: visibleToUid,
           createdAt: serverTimestamp(),
           createdByUid: u.uid,
           source: "dragdrop",
@@ -635,6 +666,8 @@ export default function PanelReparations({ trailerId, trailerNom = "", isAdmin, 
           trailerId: trailerId || null,
           trailerNom: safeTrailerNom,
           byUid: u.uid,
+          whoName: (u?.email || "").trim().toLowerCase(),
+          visibleToUid: visibleToUid,
           event: historyEvent,
           nom,
           qty: qn,

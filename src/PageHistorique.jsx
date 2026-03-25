@@ -76,7 +76,7 @@ function statusLabel(st) {
   }
 }
 
-export default function PageHistorique() {
+export default function PageHistorique({ isAdmin = false, user = null }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -92,12 +92,24 @@ export default function PageHistorique() {
   useEffect(() => {
     setLoading(true);
 
-    // Derniers logs -> on groupe côté client pour faire 1 ligne par trackId
-    const q = query(
-      collection(db, "reparations_history"),
-      orderBy("ts", "desc"),
-      limit(800) // un peu plus large pour mieux couvrir
-    );
+    if (!user?.uid) {
+      setLogs([]);
+      setLoading(false);
+      return;
+    }
+
+    const q = isAdmin
+      ? query(
+          collection(db, "reparations_history"),
+          orderBy("ts", "desc"),
+          limit(800)
+        )
+      : query(
+          collection(db, "reparations_history"),
+          where("visibleToUid", "==", user.uid),
+          orderBy("ts", "desc"),
+          limit(800)
+        );
 
     return onSnapshot(
       q,
@@ -110,13 +122,12 @@ export default function PageHistorique() {
         setLoading(false);
       }
     );
-  }, []);
+  }, [user?.uid, user?.email, isAdmin]);
 
-  // ✅ 1 ligne par trackId (on prend le log le plus récent)
-  // + on calcule un petit "eventsCountApprox" basé sur les logs chargés (pas la timeline complète)
+  // ✅ 1 ligne par trackId
   const rows = useMemo(() => {
-    const latestByTid = new Map(); // trackId => latest log
-    const countByTid = new Map(); // trackId => nb d'évènements dans le batch chargé
+    const latestByTid = new Map();
+    const countByTid = new Map();
 
     for (const l of logs) {
       const tid = (l.trackId || "").toString().trim();
@@ -124,7 +135,6 @@ export default function PageHistorique() {
 
       countByTid.set(tid, (countByTid.get(tid) || 0) + 1);
 
-      // logs est trié desc => le premier rencontré = le plus récent
       if (!latestByTid.has(tid)) latestByTid.set(tid, l);
     }
 
@@ -157,18 +167,24 @@ export default function PageHistorique() {
     setOpen(true);
   }
 
-  // Quand le popup ouvre: on charge la timeline complète de CE trackId
   useEffect(() => {
-    if (!open || !activeTrackId) return;
+    if (!open || !activeTrackId || !user?.uid) return;
 
     setTimeline([]);
     setTimelineLoading(true);
 
-    const q = query(
-      collection(db, "reparations_history"),
-      where("trackId", "==", activeTrackId),
-      orderBy("ts", "asc")
-    );
+    const q = isAdmin
+      ? query(
+          collection(db, "reparations_history"),
+          where("trackId", "==", activeTrackId),
+          orderBy("ts", "asc")
+        )
+      : query(
+          collection(db, "reparations_history"),
+          where("trackId", "==", activeTrackId),
+          where("visibleToUid", "==", user.uid),
+          orderBy("ts", "asc")
+        );
 
     return onSnapshot(
       q,
@@ -181,7 +197,7 @@ export default function PageHistorique() {
         setTimelineLoading(false);
       }
     );
-  }, [open, activeTrackId]);
+  }, [open, activeTrackId, isAdmin, user?.uid, user?.email]);
 
   function closeModal() {
     setOpen(false);
@@ -190,8 +206,9 @@ export default function PageHistorique() {
     setTimeline([]);
   }
 
-  // ✅ Supprime tout l’historique pour un trackId (sinon la ligne reviendrait)
   async function deleteTrackHistory(trackId) {
+    if (!isAdmin) return;
+
     const tid = (trackId || "").toString().trim();
     if (!tid) return;
 
@@ -214,7 +231,7 @@ export default function PageHistorique() {
       if (snap.empty) return;
 
       const docs = snap.docs;
-      const BATCH_SIZE = 450; // marge sécurité
+      const BATCH_SIZE = 450;
       for (let i = 0; i < docs.length; i += BATCH_SIZE) {
         const batch = writeBatch(db);
         const chunk = docs.slice(i, i + BATCH_SIZE);
@@ -228,6 +245,10 @@ export default function PageHistorique() {
       setDeletingTrackId(null);
     }
   }
+
+  const gridCols = isAdmin
+    ? "2.2fr 1.2fr 0.7fr 1fr 1.2fr 44px"
+    : "2.2fr 1.2fr 0.7fr 1fr 1.2fr";
 
   return (
     <div style={{ padding: 16 }}>
@@ -247,7 +268,7 @@ export default function PageHistorique() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "2.2fr 1.2fr 0.7fr 1fr 1.2fr 44px",
+              gridTemplateColumns: gridCols,
               gap: 10,
               padding: "8px 10px",
               fontWeight: 900,
@@ -259,7 +280,7 @@ export default function PageHistorique() {
             <div>Qté</div>
             <div>Statut</div>
             <div>Dernière action</div>
-            <div style={{ textAlign: "right" }} />
+            {isAdmin ? <div style={{ textAlign: "right" }} /> : null}
           </div>
 
           {rows.map((r) => {
@@ -278,7 +299,7 @@ export default function PageHistorique() {
                 title="Clique pour voir tous les avancements"
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "2.2fr 1.2fr 0.7fr 1fr 1.2fr 44px",
+                  gridTemplateColumns: gridCols,
                   gap: 10,
                   padding: "10px 10px",
                   borderBottom: "1px solid #f3f3f3",
@@ -309,40 +330,40 @@ export default function PageHistorique() {
                 <div style={{ fontWeight: 800 }}>{statusLabel(r.status)}</div>
                 <div style={{ fontWeight: 800 }}>{eventLabel(r.event)}</div>
 
-                {/* ✅ X supprimer (ne doit pas ouvrir le popup) */}
-                <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      deleteTrackHistory(tid);
-                    }}
-                    disabled={isDeleting}
-                    title="Supprimer cette ligne d’historique"
-                    style={{
-                      width: 34,
-                      height: 30,
-                      borderRadius: 10,
-                      border: "1px solid rgba(239,68,68,0.25)",
-                      background: isDeleting
-                        ? "rgba(239,68,68,0.08)"
-                        : "rgba(239,68,68,0.12)",
-                      cursor: isDeleting ? "not-allowed" : "pointer",
-                      fontWeight: 900,
-                      lineHeight: "28px",
-                    }}
-                  >
-                    {isDeleting ? "…" : "✕"}
-                  </button>
-                </div>
+                {isAdmin ? (
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        deleteTrackHistory(tid);
+                      }}
+                      disabled={isDeleting}
+                      title="Supprimer cette ligne d’historique"
+                      style={{
+                        width: 34,
+                        height: 30,
+                        borderRadius: 10,
+                        border: "1px solid rgba(239,68,68,0.25)",
+                        background: isDeleting
+                          ? "rgba(239,68,68,0.08)"
+                          : "rgba(239,68,68,0.12)",
+                        cursor: isDeleting ? "not-allowed" : "pointer",
+                        fontWeight: 900,
+                        lineHeight: "28px",
+                      }}
+                    >
+                      {isDeleting ? "…" : "✕"}
+                    </button>
+                  </div>
+                ) : null}
               </div>
             );
           })}
         </div>
       )}
 
-      {/* Modal timeline */}
       {open && (
         <div className="pt-modalOverlay" onMouseDown={closeModal}>
           <div

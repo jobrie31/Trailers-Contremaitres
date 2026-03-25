@@ -377,7 +377,7 @@ export default function App() {
         ) : route === "reparations" ? (
           <PageReparations isAdmin={isAdmin} />
         ) : route === "historique" ? (
-          <PageHistorique />
+          <PageHistorique isAdmin={isAdmin} user={user} />
         ) : (
           <PageReglagesAdmin />
         )}

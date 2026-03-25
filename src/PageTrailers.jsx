@@ -1,3 +1,4 @@
+// src/PageTrailers.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -40,7 +41,7 @@ function catNameFromId(catsGlobal, categorieId) {
   return (c?.nom || "").trim();
 }
 
-/* ---------- helpers affichage sous-catégories ---------- */
+/* ---------- helpers affichage ---------- */
 function shorten(s, max = 34) {
   const str = (s || "").toString().trim();
   if (!str) return "";
@@ -54,33 +55,49 @@ function isUniteLabel(label) {
   return n === "unite" || n === "unité" || n.includes("unité") || n.includes("unite");
 }
 
-function optionLabelForEquipement(eq, catsGlobal) {
-  const head = (eq?.nom || "").trim() || "—";
+function sanitizeFields(rawFields) {
+  return (Array.isArray(rawFields) ? rawFields : [])
+    .map((f) => {
+      if (!f || typeof f !== "object") return null;
+      return {
+        id: (f.id || "").toString(),
+        nom: (f.nom || "").toString(),
+      };
+    })
+    .filter((f) => f && f.id && f.nom.trim());
+}
+
+function sanitizeVariants(rawVariants, fields = []) {
+  return (Array.isArray(rawVariants) ? rawVariants : [])
+    .map((v) => {
+      const details = {};
+      for (const f of fields) details[f.id] = (v?.details?.[f.id] ?? "").toString();
+      return {
+        id: (v?.id || "").toString(),
+        nom: (v?.nom || "").toString().trim(),
+        details,
+      };
+    })
+    .filter((v) => v.id || v.nom || Object.values(v.details || {}).some((x) => String(x || "").trim()));
+}
+
+function optionLabelForEquipement(eq) {
+  return (eq?.nom || "").trim() || "—";
+}
+
+function optionLabelForVariante(eq, variante, catsGlobal) {
+  const head = (variante?.nom || "").trim() || "Type sans nom";
   const extras = [];
 
   const catId = (eq?.categorieId || "").trim();
   const cat = catsGlobal.find((c) => (c.id || "").trim() === catId) || null;
+  const fields = sanitizeFields(cat?.fields);
 
-  const fieldsRaw = Array.isArray(cat?.fields) ? cat.fields : [];
-  const fields = fieldsRaw
-    .map((f) => {
-      if (!f) return null;
-      if (typeof f === "string") return null;
-      if (typeof f === "object") return { id: (f.id || "").toString(), nom: (f.nom || "").toString() };
-      return null;
-    })
-    .filter((f) => f && f.id && f.nom && f.nom.trim());
-
-  const details = eq?.details || {};
   for (const f of fields) {
-    const v = (details?.[f.id] ?? "").toString().trim();
+    const v = (variante?.details?.[f.id] ?? "").toString().trim();
     if (!v) continue;
     extras.push(`${f.nom}: ${shorten(v)}`);
   }
-
-  const hasUniteField = fields.some((f) => isUniteLabel(f.nom));
-  const uniteLegacy = (eq?.unite || "").toString().trim();
-  if (uniteLegacy && !hasUniteField) extras.push(`Unité: ${shorten(uniteLegacy)}`);
 
   return extras.length ? `${head} — ${extras.join(" • ")}` : head;
 }
@@ -104,6 +121,7 @@ export default function PageTrailers() {
   const [showAddEquip, setShowAddEquip] = useState(false);
   const [addCatGlobalId, setAddCatGlobalId] = useState("");
   const [addEquipId, setAddEquipId] = useState("");
+  const [addVarianteId, setAddVarianteId] = useState("");
   const [addQty, setAddQty] = useState("");
 
   // Modal envoyer en réparation
@@ -210,6 +228,7 @@ export default function PageTrailers() {
     setShowAddEquip(false);
     setAddCatGlobalId("");
     setAddEquipId("");
+    setAddVarianteId("");
     setAddQty("");
 
     if (!selectedTrailerId) return;
@@ -304,7 +323,16 @@ export default function PageTrailers() {
     const perCat = normalize(searchByCat?.[catDocId] || "");
     const q = (qGlobal + " " + perCat).trim();
     if (!q) return items;
-    return (items || []).filter((it) => normalize(it.nom).includes(q));
+    return (items || []).filter((it) => {
+      const hay = [
+        it.nom,
+        it.varianteNom,
+        ...(Object.values(it.details || {})),
+      ]
+        .map((x) => normalize(x))
+        .join(" ");
+      return hay.includes(q);
+    });
   }
 
   const categoriesSorted = useMemo(() => {
@@ -321,39 +349,43 @@ export default function PageTrailers() {
   function fieldsForGlobalCatId(globalCatId) {
     const gid = (globalCatId || "").trim();
     const cat = catsGlobal.find((c) => (c.id || "").trim() === gid) || null;
+    return sanitizeFields(cat?.fields);
+  }
 
-    const fieldsRaw = Array.isArray(cat?.fields) ? cat.fields : [];
-    const fields = fieldsRaw
-      .map((f) => {
-        if (!f) return null;
-        if (typeof f === "string") return null;
-        if (typeof f === "object") return { id: (f.id || "").toString(), nom: (f.nom || "").toString() };
-        return null;
-      })
-      .filter((x) => x && x.id && (x.nom || "").trim());
+  function variantesForEquipement(eq) {
+    if (!eq) return [];
+    const fields = fieldsForGlobalCatId(eq.categorieId);
+    return sanitizeVariants(eq.variantes, fields).sort((a, b) =>
+      (a.nom || "").localeCompare(b.nom || "", "fr")
+    );
+  }
 
-    return fields;
+  function varianteById(eq, varianteId) {
+    return variantesForEquipement(eq).find((v) => (v.id || "").trim() === (varianteId || "").trim()) || null;
   }
 
   function valueForItemField(item, field) {
+    const direct = (item?.details?.[field.id] ?? "").toString().trim();
+    if (direct) return direct;
+
     const eq = equipementById(item?.equipementId);
     if (!eq) return "";
 
-    const d = eq.details || {};
-    const v = (d?.[field.id] ?? "").toString().trim();
-    if (v) return v;
+    const v = varianteById(eq, item?.varianteId);
+    const vv = (v?.details?.[field.id] ?? "").toString().trim();
+    if (vv) return vv;
 
     if (isUniteLabel(field.nom)) {
-      const u = (eq.unite || "").toString().trim();
+      const u = (item?.unite ?? eq?.unite ?? "").toString().trim();
       if (u) return u;
     }
     return "";
   }
 
   function labelForTrailerItem(it) {
-    const eq = equipementById(it?.equipementId);
-    if (eq) return optionLabelForEquipement(eq, catsGlobal);
-    return (it?.nom || "").trim() || "—";
+    const eqName = (it?.nom || "").trim() || "—";
+    const varName = (it?.varianteNom || "").trim();
+    return varName ? `${eqName} — ${varName}` : eqName;
   }
 
   function remarqueForTrailerItem(it) {
@@ -375,6 +407,7 @@ export default function PageTrailers() {
     setShowAddEquip(true);
     setAddCatGlobalId((globalCatId || "").trim());
     setAddEquipId("");
+    setAddVarianteId("");
     setAddQty("");
   }
 
@@ -382,7 +415,8 @@ export default function PageTrailers() {
     if (!selectedTrailerId) return;
 
     if (!addCatGlobalId) return alert("Erreur: catégorie manquante (bouton +).");
-    if (!addEquipId) return alert("Choisis un équipement.");
+    if (!addEquipId) return alert("Choisis un objet.");
+    if (!addVarianteId) return alert("Choisis une marque.");
 
     const qtyStr = (addQty ?? "").toString().trim();
     if (!qtyStr) return alert("Entre une quantité (obligatoire).");
@@ -401,9 +435,16 @@ export default function PageTrailers() {
     const eq = equipements.find((e) => e.id === addEquipId);
     if (!eq) return alert("Équipement introuvable.");
 
+    const variante = varianteById(eq, addVarianteId);
+    if (!variante) return alert("Type introuvable.");
+
     const itemsCol = collection(db, "trailers", selectedTrailerId, "categories", trailerCatDocId, "items");
 
-    const qExisting = query(itemsCol, where("equipementId", "==", addEquipId));
+    const qExisting = query(
+      itemsCol,
+      where("equipementId", "==", addEquipId),
+      where("varianteId", "==", addVarianteId)
+    );
     const exSnap = await getDocs(qExisting);
 
     const batch = writeBatch(db);
@@ -411,12 +452,21 @@ export default function PageTrailers() {
     if (!exSnap.empty) {
       const ex = exSnap.docs[0];
       const newQty = Number(ex.data().qty || 0) + qty;
-      batch.update(ex.ref, { qty: newQty });
+      batch.update(ex.ref, {
+        qty: newQty,
+        nom: eq.nom || "",
+        varianteNom: variante.nom || "",
+        details: variante.details || {},
+        unite: eq.unite || "",
+      });
     } else {
       const newRef = doc(itemsCol);
       batch.set(newRef, {
         equipementId: addEquipId,
         nom: eq.nom || "",
+        varianteId: variante.id || "",
+        varianteNom: variante.nom || "",
+        details: variante.details || {},
         unite: eq.unite || "",
         qty,
         createdAt: serverTimestamp(),
@@ -427,6 +477,7 @@ export default function PageTrailers() {
 
     setShowAddEquip(false);
     setAddEquipId("");
+    setAddVarianteId("");
     setAddQty("");
   }
 
@@ -479,6 +530,9 @@ export default function PageTrailers() {
         status,
         equipementId: repairSendItem.equipementId || null,
         nom: (repairSendItem.nom || "").toString(),
+        varianteId: repairSendItem.varianteId || null,
+        varianteNom: (repairSendItem.varianteNom || "").toString(),
+        details: repairSendItem.details || {},
         unite: (repairSendItem.unite || "").toString(),
         qty: qn,
         trailerNom: safeTrailerNom,
@@ -539,9 +593,11 @@ export default function PageTrailers() {
         byUid: auth.currentUser?.uid || null,
         event: status === "jete" ? "AJOUT_JETE" : "AJOUT_BRISE",
         nom: (repairSendItem.nom || "").toString(),
+        varianteNom: (repairSendItem.varianteNom || "").toString(),
         qty: qn,
         status,
         equipementId: repairSendItem.equipementId || null,
+        varianteId: repairSendItem.varianteId || null,
         from: { catId: repairSendCatId, itemId: repairSendItem.id },
         extra: {
           trailerQtyBefore: currentQty,
@@ -563,6 +619,7 @@ export default function PageTrailers() {
           trailerNom: safeTrailerNom,
           repId: repRef.id,
           nom: (repairSendItem.nom || "").toString(),
+          varianteNom: (repairSendItem.varianteNom || "").toString(),
           qty: qn,
           source: "page_trailers_click",
         });
@@ -715,7 +772,11 @@ export default function PageTrailers() {
     const destItemsCol = collection(db, "trailers", tradeToTrailerId, "categories", tradeToCatId, "items");
 
     try {
-      const qExisting = query(destItemsCol, where("equipementId", "==", item.equipementId));
+      const qExisting = query(
+        destItemsCol,
+        where("equipementId", "==", item.equipementId || ""),
+        where("varianteId", "==", item.varianteId || "")
+      );
       const existingSnap = await getDocs(qExisting);
 
       const batch = writeBatch(db);
@@ -727,12 +788,22 @@ export default function PageTrailers() {
       if (!existingSnap.empty) {
         const ex = existingSnap.docs[0];
         const newQty = Number(ex.data().qty || 0) + moveQty;
-        batch.update(ex.ref, { qty: newQty });
+        batch.update(ex.ref, {
+          qty: newQty,
+          nom: item.nom || "",
+          varianteId: item.varianteId || "",
+          varianteNom: item.varianteNom || "",
+          details: item.details || {},
+          unite: item.unite || "",
+        });
       } else {
         const newRef = doc(destItemsCol);
         batch.set(newRef, {
-          equipementId: item.equipementId,
+          equipementId: item.equipementId || "",
           nom: item.nom || "",
+          varianteId: item.varianteId || "",
+          varianteNom: item.varianteNom || "",
+          details: item.details || {},
           unite: item.unite || "",
           qty: moveQty,
           createdAt: serverTimestamp(),
@@ -754,6 +825,20 @@ export default function PageTrailers() {
     return equipementsPourCategorieId(gid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [addCatGlobalId, equipements]);
+
+  const addSelectedEquip = useMemo(() => {
+    return equipements.find((e) => e.id === addEquipId) || null;
+  }, [equipements, addEquipId]);
+
+  const addVarianteOptions = useMemo(() => {
+    if (!addSelectedEquip) return [];
+    return variantesForEquipement(addSelectedEquip);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addSelectedEquip, catsGlobal]);
+
+  useEffect(() => {
+    setAddVarianteId("");
+  }, [addEquipId]);
 
   function onClickRow(catId, it) {
     openRepairSendModal(catId, it);
@@ -897,7 +982,7 @@ export default function PageTrailers() {
                             <table className="pt-table">
                               <thead>
                                 <tr>
-                                  <th className="pt-th">Produit / Remarque</th>
+                                  <th className="pt-th">Produit / Type / Remarque</th>
                                   {cols.map((f) => (
                                     <th key={f.id} className="pt-th">
                                       {f.nom}
@@ -928,11 +1013,11 @@ export default function PageTrailers() {
                                             <span className="pt-itemName">{it.nom || "—"}</span>
                                           </div>
 
-                                          {remarque ? (
-                                            <div className="pt-itemRemark">{remarque}</div>
-                                          ) : (
-                                            <div className="pt-itemRemark pt-itemRemarkEmpty">—</div>
-                                          )}
+                                          {(it.varianteNom || "").trim() ? (
+                                            <div className="pt-itemTypeCenter">{it.varianteNom}</div>
+                                          ) : null}
+
+                                          {remarque ? <div className="pt-itemRemark">{remarque}</div> : null}
                                         </div>
                                       </td>
 
@@ -998,12 +1083,27 @@ export default function PageTrailers() {
 
             <div className="pt-modalBody">
               <div className="pt-modalBlock" style={{ background: "#fff" }}>
-                <div className="pt-modalLabel">Équipement</div>
+                <div className="pt-modalLabel">Objet</div>
                 <select className="pt-select" value={addEquipId} onChange={(e) => setAddEquipId(e.target.value)}>
-                  <option value="">Choisir un équipement…</option>
+                  <option value="">Choisir un objet…</option>
                   {addEquipOptions.map((eq) => (
                     <option key={eq.id} value={eq.id}>
-                      {optionLabelForEquipement(eq, catsGlobal)}
+                      {optionLabelForEquipement(eq)}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="pt-modalLabel" style={{ marginTop: 10 }}>Marque</div>
+                <select
+                  className="pt-select"
+                  value={addVarianteId}
+                  onChange={(e) => setAddVarianteId(e.target.value)}
+                  disabled={!addEquipId}
+                >
+                  <option value="">Choisir une marque...</option>
+                  {addVarianteOptions.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {optionLabelForVariante(addSelectedEquip, v, catsGlobal)}
                     </option>
                   ))}
                 </select>
@@ -1019,7 +1119,7 @@ export default function PageTrailers() {
                 />
 
                 <div className="pt-modalHint">
-                  Si l’équipement existe déjà dans cette catégorie, la quantité sera additionnée.
+                  Si le même objet avec le même type existe déjà dans cette catégorie, la quantité sera additionnée.
                 </div>
               </div>
             </div>
@@ -1047,7 +1147,10 @@ export default function PageTrailers() {
             </div>
 
             <div className="pt-modalBody">
-              <div style={{ fontWeight: 1000, marginBottom: 8 }}>{repairSendItem.nom || "—"}</div>
+              <div style={{ fontWeight: 1000, marginBottom: 4 }}>{repairSendItem.nom || "—"}</div>
+              <div style={{ fontWeight: 700, opacity: 0.8, marginBottom: 8 }}>
+                {(repairSendItem.varianteNom || "").trim() || "—"}
+              </div>
 
               <div style={{ opacity: 0.75, marginBottom: 12 }}>
                 Dispo dans le trailer: <b>{Number(repairSendItem.qty || 0)}</b>

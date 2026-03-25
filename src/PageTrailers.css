@@ -297,7 +297,7 @@
    ========================= */
 .pt-itemCell{
   display: grid;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -575,4 +575,14 @@
     width: 160px !important;
     flex: 0 0 160px !important;
   }
+}
+
+.pt-itemTypeCenter{
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.15;
+  color: rgba(15,23,42,0.82);
 }

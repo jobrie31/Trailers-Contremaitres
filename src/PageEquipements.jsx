@@ -42,7 +42,7 @@ function isUniteLabel(label) {
   return n === "unite" || n === "unité" || n.includes("unité") || n.includes("unite");
 }
 
-/* ✅ tri alpha qui ignore emojis au cas où */
+/* tri alpha qui ignore emojis */
 function stripEmojiForSort(s) {
   const str = (s || "").toString();
   return str
@@ -55,6 +55,44 @@ function stripEmojiForSort(s) {
 }
 function alphaCompareIgnoreEmoji(a, b) {
   return stripEmojiForSort(a).localeCompare(stripEmojiForSort(b), "fr");
+}
+
+function makeEmptyVariante(fields = []) {
+  const details = {};
+  for (const f of fields) details[f.id] = "";
+  return {
+    id: uid(),
+    nom: "",
+    details,
+  };
+}
+
+function sanitizeFields(rawFields) {
+  return (Array.isArray(rawFields) ? rawFields : [])
+    .map((f) => {
+      if (typeof f === "string") return { id: uid(), nom: f };
+      if (f && typeof f === "object") return { id: f.id || uid(), nom: f.nom || "" };
+      return null;
+    })
+    .filter((x) => x && x.nom && x.nom.trim());
+}
+
+function sanitizeVariants(rawVariants, catFields) {
+  const fields = Array.isArray(catFields) ? catFields : [];
+  const arr = Array.isArray(rawVariants) ? rawVariants : [];
+  return arr
+    .map((v) => {
+      const details = {};
+      for (const f of fields) {
+        details[f.id] = (v?.details?.[f.id] ?? "").toString();
+      }
+      return {
+        id: v?.id || uid(),
+        nom: (v?.nom || "").toString(),
+        details,
+      };
+    })
+    .filter((v) => v.nom.trim() || Object.values(v.details || {}).some((x) => String(x || "").trim()));
 }
 
 export default function PageEquipements() {
@@ -70,10 +108,10 @@ export default function PageEquipements() {
   const [catIcon, setCatIcon] = useState("");
   const [catColor, setCatColor] = useState(DEFAULT_COLOR);
 
-  // ✅ popover "+ équipement" (nouveau)
+  // popover "+ équipement"
   const [showAddEq, setShowAddEq] = useState(false);
 
-  // champs sous-catégories (cat)
+  // champs catégorie
   const [catFieldNom, setCatFieldNom] = useState("");
   const [catFields, setCatFields] = useState([]);
   const [catManageId, setCatManageId] = useState(null);
@@ -81,20 +119,23 @@ export default function PageEquipements() {
 
   const [equipements, setEquipements] = useState([]);
 
-  // ajout équipement (dans popover)
+  // ajout équipement
   const [nomEq, setNomEq] = useState("");
   const [categorieId, setCategorieId] = useState("");
-  const [details, setDetails] = useState({});
+  const [variantes, setVariantes] = useState([]);
   const [msg, setMsg] = useState("");
 
   // edit équipement
   const [editId, setEditId] = useState(null);
   const [editNom, setEditNom] = useState("");
   const [editCategorieId, setEditCategorieId] = useState("");
-  const [editDetails, setEditDetails] = useState({});
+  const [editVariantes, setEditVariantes] = useState([]);
 
-  // ✅ onglet catégorie ouvert
+  // onglet catégorie ouvert
   const [activeCatId, setActiveCatId] = useState("");
+
+  // lignes ouvertes
+  const [openEquipIds, setOpenEquipIds] = useState({});
 
   // ---------------------------
   // subscribe catégories
@@ -107,14 +148,7 @@ export default function PageEquipements() {
         setCats(
           snap.docs.map((d) => {
             const data = d.data() || {};
-            const fieldsRaw = Array.isArray(data.fields) ? data.fields : [];
-            const fields = fieldsRaw
-              .map((f) => {
-                if (typeof f === "string") return { id: uid(), nom: f };
-                if (f && typeof f === "object") return { id: f.id || uid(), nom: f.nom || "" };
-                return null;
-              })
-              .filter((x) => x && x.nom && x.nom.trim());
+            const fields = sanitizeFields(data.fields);
             return { id: d.id, ...data, fields };
           })
         ),
@@ -142,18 +176,27 @@ export default function PageEquipements() {
     return (c?.fields || []).filter((f) => (f?.nom || "").trim());
   }
 
-  // ---------- champs dynamiques "Sans catégorie" ----------
+  // champs dynamiques "Sans catégorie"
   const sansCatFields = useMemo(() => {
     const set = new Map();
     for (const eq of equipements) {
       const cid = (eq.categorieId || "").trim();
       if (cid) continue;
 
-      if ((eq.unite || "").trim()) set.set("legacy:unite", "Unité");
+      const variants = Array.isArray(eq.variantes) ? eq.variantes : [];
+      for (const v of variants) {
+        const d = v?.details || {};
+        for (const k of Object.keys(d)) {
+          const val = (d?.[k] ?? "").toString().trim();
+          if (!val) continue;
+          set.set(k, "Infos");
+          break;
+        }
+      }
 
-      const d = eq.details || {};
-      for (const k of Object.keys(d)) {
-        const val = (d?.[k] ?? "").toString().trim();
+      const legacyDetails = eq.details || {};
+      for (const k of Object.keys(legacyDetails)) {
+        const val = (legacyDetails?.[k] ?? "").toString().trim();
         if (!val) continue;
         set.set("legacy:infos", "Infos");
         break;
@@ -164,17 +207,20 @@ export default function PageEquipements() {
     return arr;
   }, [equipements]);
 
-  // remap details when changing category (add eq)
+  // remap variantes when changing category (add eq)
   useEffect(() => {
     if (!categorieId) {
-      setDetails({});
+      setVariantes([]);
       return;
     }
     const fields = fieldsForCat(categorieId);
-    setDetails((prev) => {
-      const next = {};
-      for (const f of fields) next[f.id] = prev?.[f.id] ?? "";
-      return next;
+    setVariantes((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return [makeEmptyVariante(fields)];
+      return prev.map((v) => {
+        const nextDetails = {};
+        for (const f of fields) nextDetails[f.id] = v?.details?.[f.id] ?? "";
+        return { ...v, details: nextDetails };
+      });
     });
   }, [categorieId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -221,7 +267,7 @@ export default function PageEquipements() {
     if (!c) return;
     if (
       !window.confirm(
-        "Retirer ce champ de la catégorie?\n(Les valeurs déjà saisies resteront dans les produits existants, mais ne seront plus affichées ici.)"
+        "Retirer ce champ de la catégorie?\n(Les valeurs déjà saisies resteront dans les équipements existants, mais ne seront plus affichées ici.)"
       )
     )
       return;
@@ -298,22 +344,57 @@ export default function PageEquipements() {
   }
 
   // ---------------------------
+  // variantes helpers
+  // ---------------------------
+  function addVariante() {
+    const fields = fieldsForCat(categorieId);
+    setVariantes((arr) => [...arr, makeEmptyVariante(fields)]);
+  }
+
+  function removeVariante(varianteId) {
+    setVariantes((arr) => arr.filter((v) => v.id !== varianteId));
+  }
+
+  function setVarianteNom(varianteId, value) {
+    setVariantes((arr) => arr.map((v) => (v.id === varianteId ? { ...v, nom: value } : v)));
+  }
+
+  function setVarianteDetailValue(varianteId, fieldId, value) {
+    setVariantes((arr) =>
+      arr.map((v) =>
+        v.id === varianteId
+          ? { ...v, details: { ...(v.details || {}), [fieldId]: value } }
+          : v
+      )
+    );
+  }
+
+  function addEditVariante() {
+    const fields = fieldsForCat(editCategorieId);
+    setEditVariantes((arr) => [...arr, makeEmptyVariante(fields)]);
+  }
+
+  function removeEditVariante(varianteId) {
+    setEditVariantes((arr) => arr.filter((v) => v.id !== varianteId));
+  }
+
+  function setEditVarianteNom(varianteId, value) {
+    setEditVariantes((arr) => arr.map((v) => (v.id === varianteId ? { ...v, nom: value } : v)));
+  }
+
+  function setEditVarianteDetailValue(varianteId, fieldId, value) {
+    setEditVariantes((arr) =>
+      arr.map((v) =>
+        v.id === varianteId
+          ? { ...v, details: { ...(v.details || {}), [fieldId]: value } }
+          : v
+      )
+    );
+  }
+
+  // ---------------------------
   // équipements
   // ---------------------------
-  function setDetailValue(fieldId, value) {
-    setDetails((d) => ({ ...(d || {}), [fieldId]: value }));
-  }
-  function setEditDetailValue(fieldId, value) {
-    setEditDetails((d) => ({ ...(d || {}), [fieldId]: value }));
-  }
-
-  function extractLegacyUnite(cat, detailsObj) {
-    const fields = (cat?.fields || []).filter((f) => f?.nom);
-    const uniteField = fields.find((f) => isUniteLabel(f.nom));
-    if (!uniteField) return "";
-    return (detailsObj?.[uniteField.id] || "").toString().trim();
-  }
-
   async function ajouterEquipement(e) {
     e.preventDefault();
     setMsg("");
@@ -326,24 +407,34 @@ export default function PageEquipements() {
     if (!cat) return setMsg("⚠️ Catégorie introuvable.");
 
     const fields = (cat.fields || []).filter((f) => f?.id && (f.nom || "").trim());
-    const cleaned = {};
-    for (const f of fields) cleaned[f.id] = (details?.[f.id] || "").toString();
+    const cleanedVariantes = (variantes || [])
+      .map((v) => {
+        const cleaned = {};
+        for (const f of fields) cleaned[f.id] = (v?.details?.[f.id] || "").toString();
+        return {
+          id: v?.id || uid(),
+          nom: (v?.nom || "").toString().trim(),
+          details: cleaned,
+        };
+      })
+      .filter((v) => v.nom || Object.values(v.details || {}).some((x) => String(x || "").trim()));
 
-    const uniteLegacy = extractLegacyUnite(cat, cleaned);
+    if (cleanedVariantes.length === 0) {
+      return setMsg("⚠️ Ajoute au moins un type / modèle dans cet équipement.");
+    }
 
     try {
       await addDoc(collection(db, "equipements"), {
         nom: n,
         categorieId,
         categorie: cat.nom || "",
-        details: cleaned,
-        unite: uniteLegacy || "",
+        variantes: cleanedVariantes,
         createdAt: serverTimestamp(),
       });
 
       setNomEq("");
       setCategorieId("");
-      setDetails({});
+      setVariantes([]);
       setMsg("✅ Équipement ajouté!");
       setActiveCatId(categorieId);
       setShowAddEq(false);
@@ -361,24 +452,36 @@ export default function PageEquipements() {
     setEditCategorieId(cid || "");
 
     if (!cid || !cat) {
-      setEditDetails({});
+      setEditVariantes([]);
       setMsg("");
       setActiveCatId(UNCATEGORIZED_ID);
       return;
     }
 
     const fields = (cat?.fields || []).filter((f) => f?.id);
-    const base = { ...(eq.details || {}) };
 
-    if (cat && Object.keys(base).length === 0 && (eq.unite || "").trim()) {
-      const uf = fields.find((f) => isUniteLabel(f.nom));
-      if (uf) base[uf.id] = eq.unite || "";
-    }
+    const existingVariants =
+      Array.isArray(eq.variantes) && eq.variantes.length > 0
+        ? eq.variantes
+        : [
+            {
+              id: uid(),
+              nom: eq.nom || "",
+              details: eq.details || {},
+            },
+          ];
 
-    const next = {};
-    for (const f of fields) next[f.id] = (base?.[f.id] ?? "").toString();
-    setEditDetails(next);
+    const nextVariants = existingVariants.map((v) => {
+      const nextDetails = {};
+      for (const f of fields) nextDetails[f.id] = (v?.details?.[f.id] ?? "").toString();
+      return {
+        id: v?.id || uid(),
+        nom: (v?.nom || "").toString(),
+        details: nextDetails,
+      };
+    });
 
+    setEditVariantes(nextVariants);
     setMsg("");
     setActiveCatId(cid);
   }
@@ -387,20 +490,23 @@ export default function PageEquipements() {
     setEditId(null);
     setEditNom("");
     setEditCategorieId("");
-    setEditDetails({});
+    setEditVariantes([]);
   }
 
   useEffect(() => {
     if (!editId) return;
     if (!editCategorieId) {
-      setEditDetails({});
+      setEditVariantes([]);
       return;
     }
     const fields = fieldsForCat(editCategorieId);
-    setEditDetails((prev) => {
-      const next = {};
-      for (const f of fields) next[f.id] = prev?.[f.id] ?? "";
-      return next;
+    setEditVariantes((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return [makeEmptyVariante(fields)];
+      return prev.map((v) => {
+        const nextDetails = {};
+        for (const f of fields) nextDetails[f.id] = v?.details?.[f.id] ?? "";
+        return { ...v, details: nextDetails };
+      });
     });
   }, [editCategorieId, editId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -414,18 +520,28 @@ export default function PageEquipements() {
     if (!cat) return setMsg("⚠️ Catégorie introuvable.");
 
     const fields = (cat.fields || []).filter((f) => f?.id && (f.nom || "").trim());
-    const cleaned = {};
-    for (const f of fields) cleaned[f.id] = (editDetails?.[f.id] || "").toString();
+    const cleanedVariantes = (editVariantes || [])
+      .map((v) => {
+        const cleaned = {};
+        for (const f of fields) cleaned[f.id] = (v?.details?.[f.id] || "").toString();
+        return {
+          id: v?.id || uid(),
+          nom: (v?.nom || "").toString().trim(),
+          details: cleaned,
+        };
+      })
+      .filter((v) => v.nom || Object.values(v.details || {}).some((x) => String(x || "").trim()));
 
-    const uniteLegacy = extractLegacyUnite(cat, cleaned);
+    if (cleanedVariantes.length === 0) {
+      return setMsg("⚠️ Garde au moins un type / modèle.");
+    }
 
     try {
       await updateDoc(doc(db, "equipements", editId), {
         nom: n,
         categorieId: editCategorieId,
         categorie: cat.nom || "",
-        details: cleaned,
-        unite: uniteLegacy || "",
+        variantes: cleanedVariantes,
       });
       setMsg("✅ Modifié!");
       cancelEdit();
@@ -443,6 +559,10 @@ export default function PageEquipements() {
     } catch (e) {
       setMsg("❌ Erreur suppression: " + (e?.message || "inconnue"));
     }
+  }
+
+  function toggleOpenEquip(eqId) {
+    setOpenEquipIds((prev) => ({ ...prev, [eqId]: !prev[eqId] }));
   }
 
   // ---------------------------
@@ -507,13 +627,18 @@ export default function PageEquipements() {
   const selectedCat = categorieId ? catFromId(categorieId) : null;
   const selectedFields = selectedCat ? selectedCat.fields || [] : [];
 
+  const editSelectedCat = editCategorieId ? catFromId(editCategorieId) : null;
+  const editSelectedFields = editSelectedCat ? editSelectedCat.fields || [] : [];
+
   const isUncatActive = activeCatId === UNCATEGORIZED_ID;
   const activeCat = !isUncatActive ? catFromId(activeCatId) : null;
 
   const activeColor = isUncatActive ? "#64748B" : activeCat?.color || DEFAULT_COLOR;
   const activeIcon = !isUncatActive ? (activeCat?.icon || "").trim() : "";
   const activeCols = isUncatActive ? [] : columnsForCat(activeCat);
-  const activeList = isUncatActive ? equipementsParCategorie.autres : equipementsParCategorie.map.get(activeCatId) || [];
+  const activeList = isUncatActive
+    ? equipementsParCategorie.autres
+    : equipementsParCategorie.map.get(activeCatId) || [];
 
   const activeBg = withAlpha(activeColor, 0.12);
   const activeBorder = withAlpha(activeColor, 0.35);
@@ -523,12 +648,13 @@ export default function PageEquipements() {
       <div className="peq-header">
         <div>
           <div className="peq-title">Équipements</div>
-          <div className="peq-subtitle">Clique une catégorie en haut pour voir sa liste complète.</div>
+          <div className="peq-subtitle">
+            Clique une catégorie en haut pour voir sa liste complète.
+          </div>
         </div>
 
-        {/* ✅ Boutons à droite: + catégorie, + équipement */}
         <div className="peq-rightBtns">
-          {/* + équipement */}
+          {/* Ajouter un équipement */}
           <div className="peq-addcatWrap">
             <button
               type="button"
@@ -539,15 +665,13 @@ export default function PageEquipements() {
                 setShowAddCat(false);
                 setMsg("");
 
-                // preset catégorie = catégorie active si possible
-                const preset =
-                  !isUncatActive && activeCatId ? activeCatId : catsSorted[0]?.id || "";
+                const preset = !isUncatActive && activeCatId ? activeCatId : catsSorted[0]?.id || "";
                 setCategorieId(preset || "");
                 setNomEq("");
-                setDetails({});
+                setVariantes(preset ? [makeEmptyVariante(fieldsForCat(preset))] : []);
               }}
             >
-              +
+              Ajouter un équipement
             </button>
 
             {showAddEq && (
@@ -559,7 +683,7 @@ export default function PageEquipements() {
                     <input
                       value={nomEq}
                       onChange={(e) => setNomEq(e.target.value)}
-                      placeholder="Nom"
+                      placeholder="Nom de l’équipement (ex: Perceuse)"
                       className="peq-input"
                       autoFocus
                     />
@@ -586,31 +710,99 @@ export default function PageEquipements() {
 
                   {categorieId && (
                     <div className="peq-dynFields">
-                      {selectedFields.length === 0 ? (
+                      <div className="peq-blockTitle">Types / modèles de cet équipement</div>
+
+                      {variantes.length === 0 ? (
                         <div className="peq-empty">
-                          Cette catégorie n’a pas de colonnes. (Ajoute-en via “Colonnes” dans les catégories.)
+                          Aucun type. Ajoute au moins un modèle dans cet équipement.
                         </div>
                       ) : (
-                        <div className="peq-gridDynInputs">
-                          {selectedFields.map((f) => (
-                            <input
-                              key={f.id}
-                              value={(details?.[f.id] ?? "").toString()}
-                              onChange={(e) => setDetailValue(f.id, e.target.value)}
-                              placeholder={f.nom}
-                              className="peq-input"
-                            />
+                        <div style={{ display: "grid", gap: 10, marginTop: 8 }}>
+                          {variantes.map((v, idx) => (
+                            <div
+                              key={v.id}
+                              style={{
+                                border: "1px solid rgba(15, 23, 42, 0.1)",
+                                borderRadius: 12,
+                                padding: 10,
+                                background: "rgba(255,255,255,0.75)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  gap: 8,
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  marginBottom: 8,
+                                }}
+                              >
+                                <div style={{ fontWeight: 900 }}>Type {idx + 1}</div>
+                                <button
+                                  type="button"
+                                  onClick={() => removeVariante(v.id)}
+                                  className="peq-dangerBtnXs"
+                                >
+                                  X
+                                </button>
+                              </div>
+
+                              <div className="peq-gridDynInputs">
+                                <input
+                                  value={v.nom}
+                                  onChange={(e) => setVarianteNom(v.id, e.target.value)}
+                                  placeholder="Marque"
+                                  className="peq-input"
+                                />
+
+                                {selectedFields.map((f) => (
+                                  <input
+                                    key={f.id}
+                                    value={(v.details?.[f.id] ?? "").toString()}
+                                    onChange={(e) => setVarianteDetailValue(v.id, f.id, e.target.value)}
+                                    placeholder={f.nom}
+                                    className="peq-input"
+                                  />
+                                ))}
+                              </div>
+                            </div>
                           ))}
                         </div>
                       )}
+
+                      <div style={{ marginTop: 10 }}>
+                        <button type="button" onClick={addVariante} className="peq-btnSmall">
+                          + Ajouter un type
+                        </button>
+                      </div>
                     </div>
                   )}
                 </form>
               </div>
             )}
           </div>
+        </div>
+      </div>
 
-          {/* + catégories */}
+      {msg ? <div className="peq-msg">{msg}</div> : null}
+
+      {/* Barre horizontale catégories */}
+      <div className="peq-card">
+        <div
+          className="peq-cardHeader"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 10,
+          }}
+        >
+          <div className="peq-cardTitle" style={{ marginBottom: 0 }}>
+            Catégories
+          </div>
+
+          {/* Ajouter une catégorie */}
           <div className="peq-addcatWrap">
             <button
               type="button"
@@ -626,7 +818,7 @@ export default function PageEquipements() {
               title="Ajouter une catégorie"
               className="peq-iconBtn"
             >
-              +
+              Ajouter une catégorie
             </button>
 
             {showAddCat && (
@@ -637,7 +829,7 @@ export default function PageEquipements() {
                   <input
                     value={catNom}
                     onChange={(e) => setCatNom(e.target.value)}
-                    placeholder="Nom (ex: Arrimage)"
+                    placeholder="Nom (ex: Outils)"
                     className="peq-input"
                   />
 
@@ -662,12 +854,12 @@ export default function PageEquipements() {
                   </button>
                 </div>
 
-                <div className="peq-blockTitle">Sous-catégories (colonnes)</div>
+                <div className="peq-blockTitle">Colonnes des types / modèles</div>
                 <div className="peq-gridAddField">
                   <input
                     value={catFieldNom}
                     onChange={(e) => setCatFieldNom(e.target.value)}
-                    placeholder="Ex: Marque, Unité, Infos..."
+                    placeholder="Ex: Marque, Unité, Voltage..."
                     className="peq-input"
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
@@ -683,12 +875,19 @@ export default function PageEquipements() {
 
                 <div className="peq-chips">
                   {catFields.length === 0 ? (
-                    <div className="peq-empty">Aucune colonne. (Tu peux quand même en ajouter plus tard.)</div>
+                    <div className="peq-empty">
+                      Aucune colonne. (Tu peux quand même en ajouter plus tard.)
+                    </div>
                   ) : (
                     catFields.map((f) => (
                       <div key={f.id} className="peq-chip">
                         {f.nom}
-                        <button type="button" onClick={() => retirerChampTemp(f.id)} className="peq-chipX" title="Retirer">
+                        <button
+                          type="button"
+                          onClick={() => retirerChampTemp(f.id)}
+                          className="peq-chipX"
+                          title="Retirer"
+                        >
                           ×
                         </button>
                       </div>
@@ -798,13 +997,6 @@ export default function PageEquipements() {
             )}
           </div>
         </div>
-      </div>
-
-      {msg ? <div className="peq-msg">{msg}</div> : null}
-
-      {/* Barre horizontale catégories */}
-      <div className="peq-card">
-        <div className="peq-cardTitle">Catégories</div>
 
         <div className="peq-tabsRow">
           {categoryTabs.length === 0 ? (
@@ -842,7 +1034,7 @@ export default function PageEquipements() {
         </div>
       </div>
 
-      {/* Vue catégorie ouverte (background couleur) */}
+      {/* Vue catégorie ouverte */}
       <div className="peq-catPanel" style={{ background: activeBg, borderColor: activeBorder }}>
         <div className="peq-catViewHeader">
           <div className="peq-catViewTitle">
@@ -850,7 +1042,9 @@ export default function PageEquipements() {
             {activeIcon ? <span className="peq-emoji">{activeIcon}</span> : null}
             {isUncatActive ? "Sans catégorie" : activeCat?.nom || "Catégorie"}
           </div>
-          <div className="peq-catCount">{activeList.length} item{activeList.length > 1 ? "s" : ""}</div>
+          <div className="peq-catCount">
+            {activeList.length} équipement{activeList.length > 1 ? "s" : ""}
+          </div>
         </div>
 
         {activeList.length === 0 ? (
@@ -860,22 +1054,9 @@ export default function PageEquipements() {
             <table className="peq-table peq-tableUltraCompact">
               <thead>
                 <tr>
-                  <th className="peq-th peq-thSm">Nom</th>
-
-                  {!isUncatActive &&
-                    activeCols.map((c) => (
-                      <th key={c.id} className="peq-th peq-thSm">
-                        {c.nom}
-                      </th>
-                    ))}
-
-                  {isUncatActive &&
-                    sansCatFields.map((f) => (
-                      <th key={f.id} className="peq-th peq-thSm">
-                        {f.nom}
-                      </th>
-                    ))}
-
+                  <th className="peq-th peq-thSm" style={{ width: 44 }}></th>
+                  <th className="peq-th peq-thSm">Équipement</th>
+                  <th className="peq-th peq-thSm">Nb types</th>
                   <th className="peq-th peq-thSm peq-thRight">Actions</th>
                 </tr>
               </thead>
@@ -883,112 +1064,234 @@ export default function PageEquipements() {
               <tbody>
                 {activeList.map((eq) => {
                   const isEdit = editId === eq.id;
+                  const isOpen = !!openEquipIds[eq.id];
+
+                  const variants =
+                    Array.isArray(eq.variantes) && eq.variantes.length > 0
+                      ? sanitizeVariants(eq.variantes, activeCols)
+                      : [];
 
                   return (
-                    <tr key={eq.id}>
-                      {isEdit ? (
-                        <>
-                          <td className="peq-td peq-tdSm">
-                            <input value={editNom} onChange={(e) => setEditNom(e.target.value)} className="peq-inputXs" />
-                            <div className="peq-mt4">
-                              <select
-                                value={editCategorieId}
-                                onChange={(e) => setEditCategorieId(e.target.value)}
+                    <React.Fragment key={eq.id}>
+                      <tr>
+                        {isEdit ? (
+                          <>
+                            <td className="peq-td peq-tdSm">✏️</td>
+
+                            <td className="peq-td peq-tdSm">
+                              <input
+                                value={editNom}
+                                onChange={(e) => setEditNom(e.target.value)}
                                 className="peq-inputXs"
-                              >
-                                <option value="">Catégorie…</option>
-                                {catsSorted.map((c) => (
-                                  <option key={c.id} value={c.id}>
-                                    {(c.icon || "").trim() ? `${(c.icon || "").trim()} ` : ""}
-                                    {c.nom}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-
-                            {isUncatActive && editCategorieId ? (
-                              <div className="peq-hintXs peq-mt4">
-                                Après sauvegarde, ouvre l’onglet de la catégorie choisie pour remplir ses colonnes.
-                              </div>
-                            ) : null}
-                          </td>
-
-                          {!isUncatActive &&
-                            activeCols.map((field) => (
-                              <td key={field.id} className="peq-td peq-tdSm">
-                                <input
-                                  value={(editDetails?.[field.id] ?? "").toString()}
-                                  onChange={(e) => setEditDetailValue(field.id, e.target.value)}
-                                  placeholder={field.nom}
+                              />
+                              <div className="peq-mt4">
+                                <select
+                                  value={editCategorieId}
+                                  onChange={(e) => setEditCategorieId(e.target.value)}
                                   className="peq-inputXs"
-                                />
-                              </td>
-                            ))}
+                                >
+                                  <option value="">Catégorie…</option>
+                                  {catsSorted.map((c) => (
+                                    <option key={c.id} value={c.id}>
+                                      {(c.icon || "").trim() ? `${(c.icon || "").trim()} ` : ""}
+                                      {c.nom}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </td>
 
-                          {isUncatActive &&
-                            sansCatFields.map((f) => (
-                              <td key={f.id} className="peq-td peq-tdSm">
-                                {f.id === "legacy:unite" ? (
-                                  <input value={(eq.unite || "").toString()} disabled className="peq-inputXs peq-inputDisabled" />
+                            <td className="peq-td peq-tdSm">
+                              {editVariantes.length} type{editVariantes.length > 1 ? "s" : ""}
+                            </td>
+
+                            <td className="peq-td peq-tdSm peq-tdRight">
+                              <div className="peq-actionsRight">
+                                <button type="button" onClick={saveEdit} className="peq-btnXs">
+                                  OK
+                                </button>
+                                <button type="button" onClick={cancelEdit} className="peq-ghostBtnXs">
+                                  Annuler
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="peq-td peq-tdSm">
+                              <button
+                                type="button"
+                                onClick={() => toggleOpenEquip(eq.id)}
+                                className="peq-ghostBtnXs"
+                                title={isOpen ? "Fermer" : "Ouvrir"}
+                              >
+                                {isOpen ? "−" : "+"}
+                              </button>
+                            </td>
+
+                            <td className="peq-td peq-tdSm">
+                              <div className="peq-eqNameSm">{eq.nom}</div>
+                            </td>
+
+                            <td className="peq-td peq-tdSm">
+                              {variants.length || (Array.isArray(eq.variantes) ? eq.variantes.length : 0)}
+                            </td>
+
+                            <td className="peq-td peq-tdSm peq-tdRight">
+                              <div className="peq-actionsRight">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    startEdit(eq);
+                                    setOpenEquipIds((prev) => ({ ...prev, [eq.id]: true }));
+                                  }}
+                                  className="peq-ghostBtnXs"
+                                >
+                                  Modifier
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => supprimerEquipement(eq.id)}
+                                  className="peq-dangerBtnXs"
+                                >
+                                  X
+                                </button>
+                              </div>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+
+                      {(isOpen || isEdit) && (
+                        <tr>
+                          <td className="peq-td peq-tdSm" colSpan={4}>
+                            <div
+                              style={{
+                                margin: "6px 0",
+                                padding: 10,
+                                borderRadius: 12,
+                                border: "1px solid rgba(15,23,42,0.08)",
+                                background: "rgba(255,255,255,0.6)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontWeight: 900,
+                                  marginBottom: 8,
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                }}
+                              >
+                                <span>Types / modèles de {isEdit ? editNom || "cet équipement" : eq.nom}</span>
+
+                                {isEdit ? (
+                                  <button type="button" onClick={addEditVariante} className="peq-btnXs">
+                                    + Ajouter un type
+                                  </button>
+                                ) : null}
+                              </div>
+
+                              {isEdit ? (
+                                editVariantes.length === 0 ? (
+                                  <div className="peq-empty">Aucun type.</div>
                                 ) : (
-                                  <span className="peq-muted">—</span>
-                                )}
-                              </td>
-                            ))}
+                                  <div style={{ display: "grid", gap: 10 }}>
+                                    {editVariantes.map((v, idx) => (
+                                      <div
+                                        key={v.id}
+                                        style={{
+                                          border: "1px solid rgba(15,23,42,0.1)",
+                                          borderRadius: 12,
+                                          padding: 10,
+                                          background: "#fff",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            gap: 8,
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            marginBottom: 8,
+                                          }}
+                                        >
+                                          <div style={{ fontWeight: 900 }}>Type {idx + 1}</div>
+                                          <button
+                                            type="button"
+                                            onClick={() => removeEditVariante(v.id)}
+                                            className="peq-dangerBtnXs"
+                                          >
+                                            X
+                                          </button>
+                                        </div>
 
-                          <td className="peq-td peq-tdSm peq-tdRight">
-                            <div className="peq-actionsRight">
-                              <button type="button" onClick={saveEdit} className="peq-btnXs">
-                                OK
-                              </button>
-                              <button type="button" onClick={cancelEdit} className="peq-ghostBtnXs">
-                                Annuler
-                              </button>
+                                        <div className="peq-gridDynInputs">
+                                          <input
+                                            value={v.nom}
+                                            onChange={(e) => setEditVarianteNom(v.id, e.target.value)}
+                                            placeholder="Marque"
+                                            className="peq-inputXs"
+                                          />
+
+                                          {editSelectedFields.map((f) => (
+                                            <input
+                                              key={f.id}
+                                              value={(v.details?.[f.id] ?? "").toString()}
+                                              onChange={(e) =>
+                                                setEditVarianteDetailValue(v.id, f.id, e.target.value)
+                                              }
+                                              placeholder={f.nom}
+                                              className="peq-inputXs"
+                                            />
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )
+                              ) : variants.length === 0 ? (
+                                <div className="peq-empty">Aucun type enregistré.</div>
+                              ) : (
+                                <div className="peq-tableWrap">
+                                  <table className="peq-table peq-tableUltraCompact">
+                                    <thead>
+                                      <tr>
+                                        <th className="peq-th peq-thSm">Marque</th>
+                                        {activeCols.map((c) => (
+                                          <th key={c.id} className="peq-th peq-thSm">
+                                            {c.nom}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {variants
+                                        .slice()
+                                        .sort((a, b) => alphaCompareIgnoreEmoji(a.nom || "", b.nom || ""))
+                                        .map((v) => (
+                                          <tr key={v.id}>
+                                            <td className="peq-td peq-tdSm">{v.nom || <span className="peq-muted">—</span>}</td>
+
+                                            {activeCols.map((field) => {
+                                              const value = (v?.details?.[field.id] ?? "").toString().trim();
+                                              return (
+                                                <td key={field.id} className="peq-td peq-tdSm">
+                                                  {value ? value : <span className="peq-muted">—</span>}
+                                                </td>
+                                              );
+                                            })}
+                                          </tr>
+                                        ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
                             </div>
                           </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="peq-td peq-tdSm">
-                            <div className="peq-eqNameSm">{eq.nom}</div>
-                          </td>
-
-                          {!isUncatActive &&
-                            activeCols.map((field) => {
-                              const d = eq.details || {};
-                              const v = (d?.[field.id] ?? "").toString().trim();
-                              const out =
-                                v ||
-                                (isUniteLabel(field.nom) && (eq.unite || "").trim()
-                                  ? (eq.unite || "").toString()
-                                  : "");
-                              return (
-                                <td key={field.id} className="peq-td peq-tdSm">
-                                  {out ? out : <span className="peq-muted">—</span>}
-                                </td>
-                              );
-                            })}
-
-                          {isUncatActive &&
-                            sansCatFields.map((f) => (
-                              <td key={f.id} className="peq-td peq-tdSm">
-                                {f.id === "legacy:unite" ? (eq.unite || <span className="peq-muted">—</span>) : <span className="peq-muted">—</span>}
-                              </td>
-                            ))}
-
-                          <td className="peq-td peq-tdSm peq-tdRight">
-                            <div className="peq-actionsRight">
-                              <button type="button" onClick={() => startEdit(eq)} className="peq-ghostBtnXs">
-                                Modifier
-                              </button>
-                              <button type="button" onClick={() => supprimerEquipement(eq.id)} className="peq-dangerBtnXs">
-                                X
-                              </button>
-                            </div>
-                          </td>
-                        </>
+                        </tr>
                       )}
-                    </tr>
+                    </React.Fragment>
                   );
                 })}
               </tbody>
