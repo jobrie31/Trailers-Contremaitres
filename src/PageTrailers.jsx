@@ -54,6 +54,22 @@ function isUniteLabel(label) {
   const n = norm(label);
   return n === "unite" || n === "unité" || n.includes("unité") || n.includes("unite");
 }
+function isNoUniteLabel(label) {
+  const n = norm(label)
+    .replace(/[’']/g, "")
+    .replace(/\./g, "")
+    .replace(/\s+/g, " ");
+
+  const hasUnit = n.includes("unité") || n.includes("unite") || n.includes("unit");
+  const hasNo =
+    n.includes("no") ||
+    n.includes("num") ||
+    n.includes("numero") ||
+    n.includes("n°") ||
+    n.includes("#");
+
+  return hasUnit && hasNo;
+}
 
 function sanitizeFields(rawFields) {
   return (Array.isArray(rawFields) ? rawFields : [])
@@ -93,13 +109,24 @@ function optionLabelForVariante(eq, variante, catsGlobal) {
   const cat = catsGlobal.find((c) => (c.id || "").trim() === catId) || null;
   const fields = sanitizeFields(cat?.fields);
 
+  const noUniteField = fields.find((f) => isNoUniteLabel(f.nom));
+  const noUniteValue = noUniteField
+    ? (variante?.details?.[noUniteField.id] ?? "").toString().trim()
+    : "";
+
   for (const f of fields) {
+    if (noUniteField?.id && f.id === noUniteField.id) continue;
+
     const v = (variante?.details?.[f.id] ?? "").toString().trim();
     if (!v) continue;
     extras.push(`${f.nom}: ${shorten(v)}`);
   }
 
-  return extras.length ? `${head} — ${extras.join(" • ")}` : head;
+  const headWithNoUnite = noUniteValue
+    ? `${head} — No d’unité: ${shorten(noUniteValue, 20)}`
+    : head;
+
+  return extras.length ? `${headWithNoUnite} • ${extras.join(" • ")}` : headWithNoUnite;
 }
 
 export default function PageTrailers() {
